@@ -83,8 +83,49 @@ n_distinct(combined_data$clinic_ID)
 
 # Summarize data by year, month and clinic_ID, summing up the icam_total
 summary_by_month_clinic <- combined_data %>%
-  group_by(clinic_ID, cAnnee, cPeriode) %>%
+  group_by(cAnnee, cPeriode) %>%
   summarise(icam_total_sum = sum(icam_total, na.rm = TRUE))
+
+# Spaghetti plot with x-axis labels as month names
+ggplot(summary_by_month_clinic, aes(x = cPeriode, y = icam_total_sum, group = cAnnee, color = as.factor(cAnnee))) +
+  geom_line() +
+  scale_x_continuous(
+    breaks = 1:12, 
+    labels = c("January", "February", "March", "April", "May", "June", 
+               "July", "August", "September", "October", "November", "December")
+  ) +
+  labs(
+    title = "Spaghetti Plot of ICAM Totals by Year",
+    x = "Month",
+    y = "Total ICAM",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+total_by_year <- summary_by_month_clinic %>%
+  group_by(cAnnee) %>%
+  summarise(total_icam = sum(icam_total_sum, na.rm = TRUE))
+
+# View the result
+print(total_by_year)
+
+
+#calculate median by month
+median_by_month <- summary_by_month_clinic %>%
+  group_by(cPeriode) %>%
+  summarise(median_icam_total = median(icam_total_sum, na.rm = TRUE))
+
+# View the result
+print(median_by_month)
+
+
+#calculate mean by month (useless imo)
+mean_by_month <- summary_by_month_clinic %>%
+  group_by(cPeriode) %>%
+  summarise(median_icam_total = mean(icam_total_sum, na.rm = TRUE))
+
+# View the result
+print(mean_by_month)
 
 # Summarize data by clinic_ID, summing up the icam_total across all years
 summary_by_clinic <- combined_data %>%
@@ -108,6 +149,14 @@ ggplot(combined_data_allyears) +
   ggtitle("Total ICAM Events by Clinic")
 # use magma, plasma or inferno with direction = -1
 
+#plot only big numberz (>3)
+ggplot(combined_data_allyears) +
+  geom_sf(aes(fill = ifelse(icam_total_sum < 4, NA, icam_total_sum)), color = "grey30") +
+  scale_fill_viridis_c(option = "plasma", direction = -1, na.value = "white") +
+  theme_void() +
+  labs(fill = "Total ICAM Events") +
+  ggtitle("Total ICAM Events by Clinic")
+# use magma, plasma or inferno with direction = -1
 
 #plot eet
 ggplot(extremely_summarized_data) + 
