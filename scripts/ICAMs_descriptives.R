@@ -68,7 +68,7 @@ ICAM_cases <- ICAM_cases %>%
 
 #create a column with total icam events for all ages and genders
 ICAM_cases <- ICAM_cases %>%
-  mutate(icam_total = rowSums(select(., V410:V423), na.rm = TRUE))
+  mutate(icam_total = rowSums(dplyr::select(., V410:V423), na.rm = TRUE))
 
 #combine ICAM cases with healthshed spatial data
 combined_data <- ICAM_cases %>%
@@ -249,10 +249,12 @@ ggplot(combined_data_allyears) +
 
 
 #create and export shapefile with cases and coordinates
-export_data <- select(combined_data, clinic_ID, cAnnee, cPeriode, 
-                      icam_total, icam_event, large_icam_event, fs_pop,
-                      geometry) 
-st_write(export_data,"./data/icam_cases_shapefile.gpkg")
+export_data <- dplyr::select(combined_data, clinic_ID, cAnnee, cPeriode,
+                      icam_total, icam_event, reg_name, dist_name, reg_uid, 
+                      dist_uid, large_icam_event, fs_pop, fs_type,
+                      geometry)
+#export_data <- combined_data
+st_write(export_data,"./data/icam_cases_shapefile.gpkg", append = FALSE)
 
 
 #plot healthsheds

@@ -55,6 +55,16 @@ chlorophyll_columns <- chla_df[ , 223:306]
 icam_cases <- icam_cases %>%
   mutate(month_year = paste(sprintf("%02d", cPeriode), cAnnee, sep = "-"))
 
+# we now change the largest icam events to a given value x (30 seems reasonable
+# to preserve the vast majority of the data while moderating the 8 remaining outliers,
+# only 4 of which on the coast)
+
+#create a single category for icam events > x to mitigate outliers
+x <- 30
+icam_cases$icam_total[icam_cases$icam_total>x] <- x
+table(icam_cases$icam_total)
+
+
 unique_months <- unique(icam_cases$month_year)
 
 sorted_months <- sort(unique_months)
@@ -145,7 +155,7 @@ summary_by_clinic <- icam_cases_coastal %>%
   )
 
 
-#plot of icam totals --> least informative because of large events
+#plot of icam totals (with largest grouped to solve outliers)
 ggplot(combined_data_allyears) +
   geom_sf(aes(fill = ifelse(icam_total_sum == 0, NA, icam_total_sum)), color = "grey90") +
   scale_fill_viridis_c(option = "plasma", direction = -1, na.value = "white") +
@@ -291,7 +301,7 @@ t_test_result <- t.test(max_chla ~ icam_event, data = analysis_data)
 
 print(t_test_result)
 
-
+#linear model
 linear_model <- gam(icam_event ~ max_chla, data = icam_chla_summary_sf, family = binomial)
 summary(linear_model)
 
@@ -353,16 +363,136 @@ summary(seasonal_model)
 # months not significant, probably because seasonality is mostly included in 
 # chlorophyll levels (and data sparsity as well)
 
-###add population in the model as an offset (this results in modeling the rate)
-## also model chlorophyll effect flexibly
-pop_offset_model <- gam(icam_event ~ s(max_chla, bs = 'ps', k = 8) + month + offset(log(landscan_pop)), 
-                      data = icam_chla_summary_seasonal, family = binomial)
-summary(pop_offset_model)
-plot(pop_offset_model,xlim = c(0,20))
 
-pop_model <- glm(icam_event ~ max_chla + landscan_pop + month, 
+#model with population as a predictor normally (no offset cause modeling probability)
+pop_model <- gam(icam_event ~ s(max_chla, bs = 'ps', k= 30) + landscan_pop + month, 
                  data = icam_chla_summary_seasonal, family = binomial)
 summary(pop_model)
+plot(pop_model,xlim = c(0,20))
+
+
+#model the number of cases per month (not just the occurence of an event)
+cases_model <- gam(icam_total ~ s(max_chla, bs = 'ps', k= 30) + landscan_pop + month, 
+                 data = icam_chla_summary_seasonal, family = 'nb', link = 'log')
+summary(cases_model)
+plot(cases_model,xlim = c(0,20))
+
+#model the number of cases per month (not just the occurence of an event) 
+#with offset(log(pop)) to model the rate of cases
+cases_model <- gam(icam_total ~ s(max_chla, bs = 'ps', k= 30) + month + offset(log(landscan_pop)), 
+                   data = icam_chla_summary_seasonal, family = 'nb', link = 'log')
+summary(cases_model)
+plot(cases_model,xlim = c(0,20))
+
+#Create month_num variable
+icam_chla_summary_seasonal <- icam_chla_summary_seasonal %>%
+  mutate(month_num = as.numeric(factor(month, levels = c("01", "02", "03", "04", "05", "06", 
+                                                         "07", "08", "09", "10", "11", "12"))))
+
+#create continuous time variable (from 1 to 84, the total number of months)
+icam_chla_summary_seasonal <- icam_chla_summary_seasonal %>%
+  mutate(
+    time = (cAnnee - min(cAnnee)) * 12 + month_num - min(month_num) + 1
+  )
+
+
+#add smooth time trend for events model
+events_model <- gam(icam_event ~ s(max_chla, bs = 'ps', k = 20) + month + s(time, bs = 'ps', k = 20) + landscan_pop, 
+                   data = icam_chla_summary_seasonal, family = 'binomial', link = 'logit')
+summary(events_model)
+plot(events_model,xlim = c(0,20))
+
+#add smooth time trend for cases model
+cases_model <- gam(icam_total ~ s(max_chla, bs = 'ps', k = 20) + month + s(time, bs = 'ps', k = 20) + offset(log(landscan_pop)), 
+                   data = icam_chla_summary_seasonal, family = 'nb', link = 'log')
+summary(cases_model)
+plot(cases_model,xlim = c(0,20))
+
+
+#add district effect and CSB type for events model
+events_model <- gam(icam_event ~ s(max_chla, bs = 'ps', k = 20) + month + 
+                      reg_name + s(time, bs = 'ps', k = 20) + 
+                      landscan_pop + fs_type, 
+                    data = icam_chla_summary_seasonal, family = 'binomial', link = 'logit')
+summary(events_model)
+plot(events_model,xlim = c(0,20))
+
+#add district effect and CSB type for cases model
+cases_model <- gam(icam_total ~ s(max_chla, bs = 'ps', k = 20) + month + 
+                      reg_name + s(time, bs = 'ps', k = 20) + 
+                      offset(log(landscan_pop)) + fs_type, 
+                    data = icam_chla_summary_seasonal, family = 'nb', link = 'log')
+summary(cases_model)
+plot(cases_model,xlim = c(0,20))
+
+
+#add clinic ID random intercept
+icam_chla_summary_seasonal$clinic_ID <- as.factor(icam_chla_summary_seasonal$clinic_ID)
+icam_chla_summary_seasonal$reg_uid <- as.factor(icam_chla_summary_seasonal$reg_uid)
+icam_chla_summary_seasonal$dist_uid <- as.factor(icam_chla_summary_seasonal$dist_uid)
+
+cases_model_re <- bam(icam_total ~ s(max_chla, bs = 'ps', k = 20) + 
+                        s(time, bs = 'ps', k = 20) +
+                        s(clinic_ID, bs = "re") +
+                        month + offset(log(landscan_pop)),
+                      data = icam_chla_summary_seasonal, 
+                      family = 'nb',
+                      method = "fREML",
+                      discrete = TRUE)
+
+summary(cases_model_re)
+plot(cases_model_re, select = 1, xlim = c(0,20))  # This plots only the smooth term for max_chla
+# 
+# #code for plotting estimated random effects
+# # Extract the coefficients
+# all_coeffs <- coef(cases_model_re)
+# 
+# # Identify which coefficients correspond to the random intercepts
+# random_intercepts <- all_coeffs[grep("clinic_ID", names(all_coeffs))]
+# 
+# # Create a data frame
+# random_effects_df <- data.frame(
+#   clinic_ID = names(random_intercepts),
+#   effect = random_intercepts
+# )
+# 
+# # Histogram
+# ggplot(random_effects_df, aes(x = effect)) +
+#   geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+#   theme_minimal() +
+#   labs(title = "Distribution of Random Intercepts by Clinic",
+#        x = "Random Intercept",
+#        y = "Count")
+# 
+# # Density plot
+# ggplot(random_effects_df, aes(x = effect)) +
+#   geom_density(fill = "skyblue", alpha = 0.7) +
+#   theme_minimal() +
+#   labs(title = "Density of Random Intercepts by Clinic",
+#        x = "Random Intercept",
+#        y = "Density")
+# 
+# # QQ plot
+# ggplot(random_effects_df, aes(sample = effect)) +
+#   stat_qq() +
+#   stat_qq_line() +
+#   theme_minimal() +
+#   labs(title = "Q-Q Plot of Random Intercepts",
+#        x = "Theoretical Quantiles",
+#        y = "Sample Quantiles")
+# 
+# # Box plot
+# ggplot(random_effects_df, aes(y = effect)) +
+#   geom_boxplot() +
+#   theme_minimal() +
+#   labs(title = "Box Plot of Random Intercepts",
+#        y = "Random Intercept")
+
+# #let's try segmented regression again
+# negbin_model <- gam(icam_total ~ max_chla + landscan_pop + month,
+#                     data = icam_chla_cases_agg, family = 'nb')
+# segmented_model <- segmented(negbin_model, seg.Z = ~max_chla)
+# summary(segmented_model)
 
 
 #let's include random effect for clinic ID
@@ -379,11 +509,6 @@ re_model <- bam(icam_event ~ max_chla + month +
 )
 
 summary(re_model)
-
-#Create month_num variable
-icam_chla_summary_seasonal <- icam_chla_summary_seasonal %>%
-  mutate(month_num = as.numeric(factor(month, levels = c("01", "02", "03", "04", "05", "06", 
-                                                         "07", "08", "09", "10", "11", "12"))))
 
 # Fit the model with p-splines for max_chla, cyclic p-spline for month, and random effect for clinic_ID
 full_spline_model <- bam(
