@@ -639,27 +639,28 @@ cases_with_all$precipitation <- cases_with_all$precipitation*1000
 
 # save cases_with_all (includes all new variables tp, t2m, sst and wealth_index_new) as geopackage in documents
 st_write(cases_with_all, "./data/cases_with_all.gpkg", append = F)
+cases_with_all <- st_read("./data/cases_with_all.gpkg")
+
 
 ##############################################################
 #create alternative version with capped chlorophyll
 #icam_chla_capped <- cases_with_all
 #icam_chla_capped$max_chla[icam_chla_capped$max_chla > 15] <- 15
 
-#GAM for events (i.e. 0 or 1) with all of our variables (finally)
+#GAM for MFP events (i.e. 0 or 1) with all of our variables (finally)
 events_model <- gam(icam_event ~ s(max_chla, bs = 'ps', k = 20) + 
                       month + #max_chla +
-                      reg_name + 
+                      #reg_name + 
                       s(time, bs = 'ps', k = 20) + 
                       mean_est_iwi +
                       landscan_pop + 
                       pop_density +
-                      #area_km2 +
+                      area_km2 +
                       fs_type + temperature_2m +
                       precipitation + sea_surface_temp, 
                     data = cases_with_all, family = 'binomial', link = 'logit')
+#,discrete = T)
 summary(events_model)
-#plot(events_model, select = 1, xlim = c(0,20), ylim = c(-1.5,1.5))
-
 # Plot the smooth effect of max_chla
 plot(events_model, select = 1, shade = TRUE, shade.col = "lightblue",
      xlab = "Chlorophyll-a", ylab = "Smooth function",
@@ -673,14 +674,40 @@ abline(h = 0, lty = 2, col = "grey50")
 
 #update column large_ICAM_event, equal to 1 if there was an ICAM event of size > x, 
 #and 0 otherwise, meaning if ICAM_total = 0 or otherwise
-x = 1
+x = 4
 cases_with_all <- mutate(cases_with_all, large_icam_event = ifelse(icam_total > x, 1, 0))
 
+#GAM for events (i.e. 0 or 1) with all of our variables (finally)
+large_events_model <- gam(large_icam_event ~ s(max_chla, bs = 'ps', k = 20) + 
+                            month + #max_chla +
+                            #reg_name + 
+                            s(time, bs = 'ps', k = 20) + 
+                            mean_est_iwi +
+                            landscan_pop + 
+                            pop_density +
+                            #area_km2 +
+                            fs_type + temperature_2m +
+                            precipitation + sea_surface_temp, 
+                          #discrete = T,
+                          data = cases_with_all, family = 'binomial'
+                          )
+summary(large_events_model)
+#plot(events_model, select = 1, xlim = c(0,20), ylim = c(-1.5,1.5))
+
+# Plot the smooth effect of max_chla
+plot(large_events_model, select = 1, shade = TRUE, shade.col = "lightblue",
+     xlab = "Chlorophyll-a", ylab = "Smooth function",
+     main = "Effect of Chlorophyll-a on ICAM Events", xlim=c(0,22))
+
+# Add a rug plot to show the distribution of the data
+rug(cases_with_all$max_chla)
+
+# Add a grey dashed line at y = 0
+abline(h = 0, lty = 2, col = "grey50")
+
 #GAM for cases counts (with cases censored at 50) with all of our variables
-
-
-#GAM for large events (i.e. 0 or 1) with all of our variables (finally)
-events_model <- gam(icam_total ~ s(max_chla, bs = 'ps', k = 20) + 
+#does not converge with region
+cases_model <- bam(icam_total ~ s(max_chla, bs = 'ps', k = 20) + 
                       month + #max_chla +
                       #reg_name + 
                       s(time, bs = 'ps', k = 20) + 
@@ -690,30 +717,50 @@ events_model <- gam(icam_total ~ s(max_chla, bs = 'ps', k = 20) +
                       #area_km2 +
                       fs_type + temperature_2m +
                       precipitation + sea_surface_temp, 
-                    data = cases_with_all, family = 'nb')
-                    #,discrete = T)
-summary(events_model)
-plot(events_model, select = 1, xlim = c(0,20), ylim = c(-3,3))
-abline(h=0)
+                    data = cases_with_all, family = 'ziP', discrete = T)
+summary(cases_model)
+# Plot the smooth effect of max_chla
+plot(cases_model, select = 1, shade = TRUE, shade.col = "lightblue",
+     xlab = "Chlorophyll-a", ylab = "Smooth function",
+     main = "Effect of Chlorophyll-a on ICAM Events", xlim=c(0,22))
+
+# Add a rug plot to show the distribution of the data
+rug(cases_with_all$max_chla)
+
+# Add a grey dashed line at y = 0
+abline(h = 0, lty = 2, col = "grey50")
+
 
 #run model only on western regions:
 cases_western <- dplyr::filter(cases_with_all, 
                   reg_name %in% c('Atsimo Andrefana', 'Menabe',
                                   'Melaky','Boeny','Sofia', 'Diana'))
 
-#add district effect and CSB type for events model, wealth too
-events_model <- gam(icam_event ~ s(max_chla, bs = 'ps', k = 20) + 
-                      month + 
-                      reg_name + 
+#GAM for MFP events (i.e. 0 or 1) with all of our variables (finally)
+events_model_western <- gam(icam_event ~ s(max_chla, bs = 'ps', k = 20) + 
+                      month + #max_chla +
+                      #reg_name + 
                       s(time, bs = 'ps', k = 20) + 
                       mean_est_iwi +
-                      landscan_pop + pop_density +
+                      landscan_pop + 
+                      pop_density +
+                      #area_km2 +
                       fs_type + temperature_2m +
                       precipitation + sea_surface_temp, 
                     data = cases_western, family = 'binomial', link = 'logit')
-summary(events_model)
-plot(events_model, select = 1, xlim = c(0,20), ylim = c(-1.5,1.5))
+#,discrete = T)
+summary(events_model_western)
+plot(events_model_western)
+# Plot the smooth effect of max_chla
+plot(events_model_western, select = 1, shade = TRUE, shade.col = "lightblue",
+     xlab = "Chlorophyll-a", ylab = "Smooth function",
+     main = "Effect of Chlorophyll-a on ICAM Events", xlim=c(0,22))
 
+# Add a rug plot to show the distribution of the data
+rug(cases_with_all$max_chla)
+
+# Add a grey dashed line at y = 0
+abline(h = 0, lty = 2, col = "grey50")
 #add district effect and CSB type for cases model
 cases_model <- gam(icam_total ~ s(max_chla, bs = 'ps', k = 20) + month + 
                       reg_name + s(time, bs = 'ps', k = 20) + 
