@@ -118,8 +118,12 @@ madagascar_coastline_buffer_line <- st_boundary(st_buffer(coastline_combined, di
 
 # #create buffer polygons (not for plotting, but needed for filtering later)
 madagascar_coastline_buffer <- st_buffer(coastline_combined, dist = 50000)
+#save shapefile of buffer
+#st_write(madagascar_coastline_buffer, "madagascar_coastline_buffer.shp", delete_dsn = TRUE)
+
+
 # #create buffer polygons (just for plotting chla)
-madagascar_coastline_buffer_large <- st_buffer(coastline_combined, dist = 50000)
+madagascar_coastline_buffer_large <- st_buffer(coastline_combined, dist = 50000, append = FALSE)
 
 
 # Filter chlorophyll points within the buffer
@@ -457,6 +461,9 @@ cases_with_all <- cases_with_all %>%
     latitude = st_coordinates(centroid)[, 2]   # Extract Y (latitude)
   )
 
+#detect and correct "falsely coastal" healthsheds
+cases_with_all$coastal[cases_with_all$max_chla==0] <- 0
+
 #GAM for MFP events (i.e. 0 or 1) with all of our variables (finally)
 events_model <- gam(icam_event ~  
                       coastal +
@@ -472,9 +479,9 @@ events_model <- gam(icam_event ~
                       #area_km2 +
                       fs_type + 
                       #s(longitude, latitude, bs = "sos", k = 30) +
-                      s(temperature_2m, bs = 'ps', k = 20) +
-                      I(coastal*sea_surface_temp_centered) +
-                      s(precipitation, bs = 'ps', k = 20), 
+                      temperature_2m +
+                      s(precipitation, bs = 'ps', k = 20) +
+                      I(coastal*sea_surface_temp_centered), 
                     data = cases_with_all,
                     #method = 'discrete',
                     #discrete = T,
@@ -484,7 +491,19 @@ summary(events_model)
 # Plot the smooth effect of max_chla
 plot(events_model, select = 1, shade = TRUE, shade.col = "lightblue",
      xlab = "Chlorophyll-a", ylab = "Smooth function",
-     main = "Effect of Chlorophyll-a on ICAM Events", xlim=c(0,22),ylim = c(-2,2))
+     main = "Effect of Chlorophyll-a on MFP Events", xlim=c(0,30),ylim = c(-1,1.5))
+
+# Add a rug plot to show the distribution of the data
+rug(cases_with_all$max_chla)
+
+# Add a grey dashed line at y = 0
+abline(h = 0, lty = 2, col = "grey50")
+
+
+# Plot the smooth effect of precipitation
+plot(events_model, select = 3, shade = TRUE, shade.col = "lightblue",
+     xlab = "Precipitation", ylab = "Smooth function",
+     main = "Effect of Precipitation on MFP events", xlim=c(0,30),ylim = c(-1.5,1.5))
 
 # Add a rug plot to show the distribution of the data
 rug(cases_with_all$max_chla)
@@ -513,19 +532,6 @@ events_model <- gam(icam_event ~
                     data = cases_with_all, family = 'binomial', link = 'logit')
 #,discrete = T)
 summary(events_model)
-
-
-# Get number of smooth terms in the model
-num_smooths <- length(events_model$smooth)
-
-# Loop through each smooth term and plot separately
-for (i in 1:num_smooths) {
-  plot(events_model, select = i, ylim = c(-2, 2), shade = TRUE, shade.col = "lightblue",
-       main = paste("Effect of", events_model$smooth[[i]]$term))
-  
-  # Pause between plots if running interactively
-  readline(prompt = "Press [Enter] to view the next smooth term...")
-}
 
 
 
@@ -569,18 +575,27 @@ x = 4
 cases_with_all <- mutate(cases_with_all, large_icam_event = ifelse(icam_total > x, 1, 0))
 
 #GAM for events (i.e. 0 or 1) with all of our variables (finally)
-large_events_model <- gam(large_icam_event ~ s(max_chla, bs = 'ps', k = 20) + 
-                            month + #max_chla +
-                            #reg_name + 
-                            s(time, bs = 'ps', k = 20) + 
-                            mean_est_iwi +
-                            landscan_pop + 
-                            pop_density +
-                            #area_km2 +
-                            fs_type + temperature_2m +
-                            precipitation + sea_surface_temp, 
-                          #discrete = T,
-                          data = cases_with_all, family = 'binomial'
+large_events_model <- gam(large_icam_event ~  
+                      coastal +
+                      s(I(coastal*max_chla), bs = 'ps', k = 20) +
+                      #I(coastal*max_chla) +
+                      month + #max_chla +
+                      #reg_name + 
+                      #s(dist_uid, bs = "re") +
+                      s(time, bs = 'ps', k = 20) + 
+                      wealth_index +
+                      landscan_pop + 
+                      #pop_density +
+                      #area_km2 +
+                      fs_type + 
+                      #s(longitude, latitude, bs = "sos", k = 30) +
+                      temperature_2m +
+                      s(precipitation, bs = 'ps', k = 20) +
+                      I(coastal*sea_surface_temp_centered), 
+                    data = cases_with_all,
+                    #method = 'discrete',
+                    #discrete = T,
+                    family = 'binomial' 
 )
 summary(large_events_model)
 #plot(events_model, select = 1, xlim = c(0,20), ylim = c(-1.5,1.5))
@@ -712,11 +727,16 @@ ggplot() +
   coord_sf()
 
 
-
-# Save the plot
-ggsave("madagascar_chlorophyll.png", width = 10, height = 8, dpi = 300)
-
 ###Wealth Index
+# Create new sf for dropping things
+cases_with_all_new_sf <- st_as_sf(cases_with_all)
+
+# Keep only one record per clinic_ID (since wealth index is time-invariant)
+wealth_index_sf <- cases_with_all_new_sf %>%
+  filter(!is.na(wealth_index)) %>%  # Remove any missing wealth index values
+  group_by(clinic_ID) %>%
+  summarise(wealth_index = first(wealth_index), geometry = first(geom), .groups = "drop")
+
 ggplot() +
   # Wealth Index Layer
   geom_sf(data = wealth_index_sf, aes(fill = log1p(wealth_index)), color = NA) +  # No color on polygons
@@ -730,16 +750,17 @@ ggplot() +
     caption = "Source: World Bank"
   )
 
-###compute average exposures
 
-# Compute average values per clinic while retaining `coastal`
+
+# Compute average values per clinic over the entire 2016-2022 period
 cases_avg <- cases_with_all %>%
   group_by(clinic_ID, coastal) %>%  # Retain coastal classification
   summarise(
     avg_precipitation = mean(precipitation, na.rm = TRUE),
     avg_temperature_2m = mean(temperature_2m, na.rm = TRUE),
     avg_sea_surface_temp = mean(sea_surface_temp, na.rm = TRUE),
-    avg_chlorophyll = mean(max_chla, na.rm = TRUE),  # Assuming mean_chla is the relevant column
+    avg_chlorophyll = mean(max_chla, na.rm = TRUE), 
+    avg_pop_density = mean(pop_density, na.rm = TRUE),  # Compute average population density
     geometry = first(geom)  # Retain spatial data
   ) %>%
   ungroup()
@@ -751,17 +772,42 @@ cases_avg <- st_as_sf(cases_avg, crs = st_crs(cases_with_all))
 cases_avg <- cases_avg %>%
   mutate(
     avg_sea_surface_temp = ifelse(coastal == 0, NA, avg_sea_surface_temp),
-    avg_chlorophyll = ifelse(coastal == 0, NA, avg_chlorophyll)
+    avg_chlorophyll = ifelse(coastal == 0, NA, avg_chlorophyll),
+    log_avg_pop_density = log1p(avg_pop_density)  # Apply log transformation to population density
+  )
+
+
+ggplot(cases_avg) +
+  geom_sf(aes(fill = log_avg_pop_density), color = NA) +  
+  scale_fill_viridis_c(option = "viridis", direction = -1, na.value = "white") +  
+  theme_minimal() +
+  labs(fill = "Log Population Density") +
+  labs(
+    title = "Population Density by Healthshed",
+    subtitle = "Log-scale"
   )
 
 
 
-# Plot 1: Average Precipitation (2016-2022)
+
+# Plot 1: Average Precipitation (2016-2022) (old auto-scale)
+# ggplot(cases_avg) +
+#   geom_sf(aes(fill = avg_precipitation), color = NA) +  # Completely remove borders
+#   scale_fill_viridis_c(option = "plasma", direction = -1, na.value = "white") +
+#   theme_minimal() +
+#   labs(fill = "Avg. Precipitation (mm/day)") +
+#   labs(
+#     title = "Average Precipitation by Healthshed",
+#     subtitle = "2016-2022"
+#   )
+
+# Plot 1: Average Precipitation (2016-2022) (new)
 ggplot(cases_avg) +
-  geom_sf(aes(fill = avg_precipitation), color = NA) +  # Completely remove borders
-  scale_fill_viridis_c(option = "plasma", direction = -1, na.value = "white") +
+  geom_sf(aes(fill = avg_precipitation), color = NA) +  
+  scale_fill_viridis_c(option = "plasma", direction = -1, na.value = "white", 
+                       limits = c(0.78, 9.99)) +  # Ensure scale covers full range
   theme_minimal() +
-  labs(fill = "Avg. Precipitation (mm)") +
+  labs(fill = "Avg. Precipitation (mm/day)") +
   labs(
     title = "Average Precipitation by Healthshed",
     subtitle = "2016-2022"
@@ -794,13 +840,22 @@ ggplot(cases_avg) +
 # Plot 4: Average Chlorophyll-a Concentration (2016-2022)
 ggplot(cases_avg) +
   geom_sf(aes(fill = avg_chlorophyll), color = NA) +  # Completely remove borders
-  scale_fill_viridis_c(option = "viridis", direction = 1, na.value = "white") +  # Blue-Green-Yellow
+  scale_fill_viridis_c(option = "plasma", direction = 1, na.value = "white") +  
   theme_minimal() +
   labs(fill = "Avg. Chlorophyll-a (mg/m³)") +
   labs(
-    title = "Average Chlorophyll-a by Healthshed",
+    title = "Maximum Average Chlorophyll-a by Healthshed",
     subtitle = "2016-2022"
   )
+
+# Plot empty healthsheds with borders only
+ggplot(combined_data_allyears) +
+  geom_sf(fill = "grey98", color = "grey75", size = 0.05) +  # No fill, only borders
+  theme_minimal() +
+  labs(
+    title = "Healthshed Boundaries"
+  )
+
 
 
 
