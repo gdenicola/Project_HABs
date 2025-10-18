@@ -161,7 +161,6 @@ icam_cases_coastal <- icam_cases %>%
 #in a specific year_month period; and (2), the maximum clorophyll level 
 #among all pixels that it is matched to, in a specific year_month period. 
 
-
 # Extract coordinates from chla_coastal before joining, to keep them
 chla_coastal <- chla_coastal %>%
   mutate(lon = st_coordinates(geometry)[,1],
@@ -185,14 +184,14 @@ rm(icam_cases_coastal_only, icam_cases)
 #saveRDS(icam_cases_near_water, "./data/icam_cases_near_water.rds")
 #saveRDS(chla_coastal, "./data/chla_coastal_with_coords.rds")  
 
+#icam_cases_near_water_simp <- st_simplify(icam_cases_near_water)
+#chla_coastal_simp <- st_simplify(chla_coastal)
+
 #Now run st_join() only on this smaller subset - takes about 90 minutes with 50km radius
-icam_chla_join <- st_join(icam_cases_near_water, chla_coastal,
-                          join = st_is_within_distance, dist = 50000)
+# icam_chla_join <- st_join(icam_cases_near_water_simp, chla_coastal_simp,
+#                           join = st_is_within_distance, dist = 50000)
 
-
-#icam_chla_join <- readRDS("./data/icam_chla_join_50km.rds")
-
-
+###START OF OLD BLOCK#######
 # Perform a spatial join to find water pixels within 50 km of each healthshed
 # takes about XX minutes (used to be 30 with just coastal stuff)
 # icam_chla_join <- st_join(
@@ -205,53 +204,175 @@ icam_chla_join <- st_join(icam_cases_near_water, chla_coastal,
 #####################
 
 # Identify date columns
-date_columns <- grep("^\\d{2}-\\d{4}$", names(icam_chla_join), value = TRUE)
+# date_columns <- grep("^\\d{2}-\\d{4}$", names(icam_chla_join), value = TRUE)
+# 
+# # Process the data
+# icam_chla_filtered <- icam_chla_join %>%
+#   mutate(
+#     row_id = row_number(),
+#     chla_value = map2_dbl(month_year, row_id, function(my, id) {
+#       if (my %in% date_columns) {
+#         value <- icam_chla_join[[my]][id]
+#         if(is.numeric(value)) value else as.numeric(NA)
+#       } else {
+#         as.numeric(NA)
+#       }
+#     })
+#   ) %>%
+#   dplyr::select(-all_of(date_columns), -row_id)
+# 
+# #clear large (and now useless) object from memory 
+# rm(icam_chla_join)
+# 
+# #now calculate mean average monthly chlorophyll (probably useless) and 
+# # max average monthly cholorophyll per healthshed (probably useful)
+# 
+# # Step 1: Extract non-spatial data and calculate max and mean
+# non_spatial_data <- st_drop_geometry(icam_chla_filtered)
+# 
+# icam_chla_summary <- non_spatial_data %>%
+#   group_by(clinic_ID, month_year) %>%
+#   summarise(
+#     max_chla = if(all(is.na(chla_value))) NA_real_ else max(chla_value, na.rm = TRUE),
+#     mean_chla = if(all(is.na(chla_value))) NA_real_ else mean(chla_value, na.rm = TRUE),
+#     n_chla_obs = sum(!is.na(chla_value)),  # Count of non-NA observations
+#     across(everything(), ~if(is.numeric(.)) first(.) else first(na.omit(.))),
+#     .groups = 'drop'
+#   ) %>%
+#   dplyr::select(-chla_value)  # Remove the original chla_value column if you don't need it
+# 
+# # Step 2: Join with spatial data
+# spatial_data <- icam_chla_filtered %>% 
+#   dplyr::select(clinic_ID, geom) %>% 
+#   group_by(clinic_ID) %>%
+#   slice(1) %>%  # Take the first geometry for each clinic_ID
+#   ungroup()
+# 
+# icam_chla_summary_sf <- icam_chla_summary %>%
+#   left_join(spatial_data, by = "clinic_ID") %>%
+#   st_as_sf()
+# 
+# 
+# #this seems to have worked, i have to do a few checks just to
+# # see if these are really mean and max. 
+# 
+# #now NEED to rejoin the non-coastal healthsheds in this, with
+# #chlorophyll value 0:
+# 
+# # Step 1: Remove geometry from `icam_chla_summary_sf` before joining
+# icam_chla_summary_df <- icam_chla_summary_sf %>%
+#   st_drop_geometry() %>%  # Convert to a regular dataframe
+#   select(clinic_ID, month_year, max_chla, mean_chla, n_chla_obs)
+# 
+# # Step 2: Perform a left join, keeping all healthsheds
+# icam_final_sf <- icam_cases_coastal %>%
+#   left_join(icam_chla_summary_df, by = c("clinic_ID", "month_year"))
+# 
+# # Step 3: Replace NA values for non-coastal healthsheds
+# icam_final_sf <- icam_final_sf %>%
+#   mutate(
+#     max_chla = ifelse(is.na(max_chla), 0, max_chla),
+#     mean_chla = ifelse(is.na(mean_chla), 0, mean_chla),
+#     n_chla_obs = ifelse(is.na(n_chla_obs), 0, n_chla_obs)
+#   )
 
-# Process the data
-icam_chla_filtered <- icam_chla_join %>%
-  mutate(
-    row_id = row_number(),
-    chla_value = map2_dbl(month_year, row_id, function(my, id) {
-      if (my %in% date_columns) {
-        value <- icam_chla_join[[my]][id]
-        if(is.numeric(value)) value else as.numeric(NA)
-      } else {
-        as.numeric(NA)
-      }
-    })
+# # ~~~~~~~~~~ END OF SLOW/OLD BLOCK ~~~~~~~~~~
+
+# ~~~~~~~~~~ START OF FINAL, OPTIMIZED, AND CORRECTED BLOCK ~~~~~~~~~~
+
+# Define search radius for the test
+search_radius <- 50000
+
+cat("Running the final, optimized method with a", search_radius, "m radius...\n")
+
+# Step 1: Get UNIQUE clinic IDs. This is fast and correct.
+unique_clinic_ids <- icam_cases_near_water %>%
+  st_drop_geometry() %>%
+  distinct(clinic_ID)
+
+# Step 2: (THE NEW, FASTER WAY) Create the unique healthsheds sf object.
+# This finds the row index of the first appearance of each unique clinic ID
+# and uses it to subset the sf object directly. This is much faster than filter() + distinct().
+first_occurrence_indices <- match(unique_clinic_ids$clinic_ID, icam_cases_near_water$clinic_ID)
+unique_healthsheds_sf <- icam_cases_near_water[first_occurrence_indices, ]
+
+# Step 3: Perform the efficient spatial search ONCE.
+nearby_indices_list <- st_is_within_distance(unique_healthsheds_sf, chla_coastal, dist = search_radius)
+
+# Step 4: Name the list for quick lookups using the clinic ID.
+names(nearby_indices_list) <- unique_healthsheds_sf$clinic_ID
+
+# Step 5: Create a version of chla_coastal without geometry for faster data access inside the loop.
+chla_coastal_df <- st_drop_geometry(chla_coastal)
+
+# Step 6: The main calculation. Iterate and perform direct, indexed lookups.
+stats <- purrr::map2(
+  .x = icam_cases_near_water$clinic_ID,
+  .y = icam_cases_near_water$month_year,
+  .f = function(current_clinic, current_month) {
+    
+    indices <- nearby_indices_list[[current_clinic]]
+    
+    if (length(indices) == 0) {
+      return(tibble(mean_chla_new = NA_real_, max_chla_new = NA_real_, n_chla_obs_new = 0, lon_new = NA_real_, lat_new = NA_real_))
+    }
+    
+    chla_values <- chla_coastal_df[[current_month]][indices]
+    
+    n_obs <- sum(!is.na(chla_values))
+    if (n_obs == 0) {
+      mean_val <- NA_real_
+      max_val <- NA_real_
+    } else {
+      mean_val <- mean(chla_values, na.rm = TRUE)
+      max_val <- max(chla_values, na.rm = TRUE)
+    }
+    
+    first_match_lon <- chla_coastal_df$lon[indices[1]]
+    first_match_lat <- chla_coastal_df$lat[indices[1]]
+    
+    return(tibble(mean_chla_new = mean_val, max_chla_new = max_val, n_chla_obs_new = n_obs, lon_new = first_match_lon, lat_new = first_match_lat))
+  }
+) %>% 
+  bind_rows()
+
+# Step 7: Combine the calculated stats with the original data.
+icam_chla_summary_FAST <- icam_cases_near_water %>% 
+  st_drop_geometry() %>% 
+  bind_cols(stats) %>%
+  select(
+    -any_of(c("max_chla", "mean_chla", "n_chla_obs", "lon", "lat"))
   ) %>%
-  dplyr::select(-all_of(date_columns), -row_id)
+  rename(
+    max_chla = max_chla_new,
+    mean_chla = mean_chla_new,
+    n_chla_obs = n_chla_obs_new,
+    lon = lon_new,
+    lat = lat_new
+  )
 
-#clear large (and now useless) object from memory 
-rm(icam_chla_join)
+cat("Fast method finished. The new object is 'icam_chla_summary_FAST'.\n")
 
-#now calculate mean average monthly chlorophyll (probably useless) and 
-# max average monthly cholorophyll per healthshed (probably useful)
+# Clean up
+#rm(unique_clinic_ids, first_occurrence_indices, unique_healthsheds_sf, nearby_indices_list, chla_coastal_df, stats)
 
-# Step 1: Extract non-spatial data and calculate max and mean
-non_spatial_data <- st_drop_geometry(icam_chla_filtered)
-
-icam_chla_summary <- non_spatial_data %>%
-  group_by(clinic_ID, month_year) %>%
-  summarise(
-    max_chla = if(all(is.na(chla_value))) NA_real_ else max(chla_value, na.rm = TRUE),
-    mean_chla = if(all(is.na(chla_value))) NA_real_ else mean(chla_value, na.rm = TRUE),
-    n_chla_obs = sum(!is.na(chla_value)),  # Count of non-NA observations
-    across(everything(), ~if(is.numeric(.)) first(.) else first(na.omit(.))),
-    .groups = 'drop'
-  ) %>%
-  dplyr::select(-chla_value)  # Remove the original chla_value column if you don't need it
+icam_chla_summary <- icam_chla_summary_FAST
 
 # Step 2: Join with spatial data
-spatial_data <- icam_chla_filtered %>% 
-  dplyr::select(clinic_ID, geom) %>% 
-  group_by(clinic_ID) %>%
-  slice(1) %>%  # Take the first geometry for each clinic_ID
-  ungroup()
+# We use the 'unique_healthsheds_sf' object that we already created efficiently in the block above.
+# This object contains exactly one geometry for each clinic_ID.
+spatial_data <- unique_healthsheds_sf %>% 
+  select(clinic_ID, geom)
 
+# Now, join the geometry back to the summary data.
 icam_chla_summary_sf <- icam_chla_summary %>%
   left_join(spatial_data, by = "clinic_ID") %>%
   st_as_sf()
+
+# We no longer need this intermediate object, so we can clean it up now.
+#rm(unique_healthsheds_sf)
+
+# ~~~~~~~~~~ END OF FINAL, OPTIMIZED, AND CORRECTED BLOCK ~~~~~~~~~~
 
 
 #this seems to have worked, i have to do a few checks just to
@@ -313,7 +434,8 @@ cases_with_all <- cases_with_all %>%
 
 #include climate exposure variables
 # Load all layers from the GRIB file
-exposure_stack <- stack("./data/exposure_data.grib")
+#downloaded from https://cds.climate.copernicus.eu/requests?tab=all
+exposure_stack <- stack("./data/exposure_data_2024.grib")
 
 # Get full names of the layers
 full_names <- names(exposure_stack)
@@ -440,7 +562,7 @@ cases_with_all <- cases_with_all %>%
 
 # save cases_with_all (includes all new variables tp, t2m, sst and wealth_index_new) as geopackage in documents
 #st_write(cases_with_all, "./data/cases_with_all_20km.gpkg", append = F)
-cases_with_all <- st_read("./data/cases_with_all_50km.gpkg")
+#cases_with_all <- st_read("./data/cases_with_all_50km.gpkg")
 ##############################################################
 #create alternative version with capped chlorophyll
 #icam_chla_capped <- cases_with_all
@@ -457,6 +579,8 @@ mean_sst_C <- mean(cases_with_all$sea_surface_temp, na.rm = TRUE)
 cases_with_all <- cases_with_all %>%
   mutate(sea_surface_temp_centered = sea_surface_temp - mean_sst_C)
 
+
+
 #get longitude and latitude to compute smooth spatial
 # Compute centroids
 cases_with_all <- cases_with_all %>%
@@ -469,10 +593,14 @@ cases_with_all <- cases_with_all %>%
 #detect and correct "falsely coastal" healthsheds
 cases_with_all$coastal[cases_with_all$max_chla==0] <- 0
 
+# Filter the dataframe and save it to a new object
+cases_filtered <- cases_with_all %>%
+  filter(! (year %in% c(2023, 2024)))
+
 #GAM for MFP events (i.e. 0 or 1) with all of our variables (finally)
 events_model <- gam(icam_event ~  
                       coastal +
-                      s(I(coastal*max_chla), bs = 'ps', k = 20) +
+                      s(I(coastal*max_chla), bs = 'ps', k = 8) +
                       #I(coastal*max_chla) +
                       month + #max_chla +
                       #reg_name + 
@@ -496,7 +624,7 @@ summary(events_model)
 # Plot the smooth effect of max_chla
 plot(events_model, select = 1, shade = TRUE, shade.col = "lightblue",
      xlab = "Chlorophyll-a", ylab = "Smooth function",
-     main = "Effect of Chlorophyll-a on MFP Events", xlim=c(0,30),ylim = c(-1,1.5))
+     main = "Effect of Chlorophyll-a on MFP Events", xlim=c(0,30),ylim = c(-2,2))
 
 # Add a rug plot to show the distribution of the data
 rug(cases_with_all$max_chla)
