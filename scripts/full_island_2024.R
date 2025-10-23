@@ -621,10 +621,12 @@ events_model <- gam(icam_event ~
                     family = 'binomial' 
                     )
 summary(events_model)
+
+
 # Plot the smooth effect of max_chla
-plot(events_model, select = 1, shade = TRUE, shade.col = "lightblue",
+plot(events_model_lagged, select = 2, shade = TRUE, shade.col = "lightblue",
      xlab = "Chlorophyll-a", ylab = "Smooth function",
-     main = "Effect of Chlorophyll-a on MFP Events", xlim=c(0,30),ylim = c(-2,2))
+     main = "Effect of Chlorophyll-a on MFP Events", xlim=c(0,30),ylim = c(-2.5,2.5))
 
 # Add a rug plot to show the distribution of the data
 rug(cases_with_all$max_chla)
@@ -643,6 +645,46 @@ rug(cases_with_all$max_chla)
 
 # Add a grey dashed line at y = 0
 abline(h = 0, lty = 2, col = "grey50")
+
+
+# Create the lagged chlorophyll variable
+cases_with_all <- cases_with_all %>%
+  # Group by each individual clinic's time series
+  group_by(clinic_ID) %>%
+  # Make sure the data is sorted chronologically within each clinic
+  arrange(time) %>%
+  # Create a new column 'max_chla_lag1' which is the value of 'max_chla' from the previous row (within that group)
+  mutate(max_chla_lag1 = lag(max_chla, n = 1)) %>%
+  # It's good practice to ungroup after you're done with grouped operations
+  ungroup()
+
+
+#GAM for MFP events (i.e. 0 or 1) with all of our variables (finally)
+events_model_lagged <- gam(icam_event ~  
+                      coastal +
+                      s(I(coastal*max_chla), bs = 'ps', k = 8) +
+                      s(I(coastal*max_chla_lag1), bs = 'ps', k = 8) +
+                      #I(coastal*max_chla) +
+                      month + #max_chla +
+                      #reg_name + 
+                      #s(dist_uid, bs = "re") +
+                      s(time, bs = 'ps', k = 20) + 
+                      wealth_index +
+                      landscan_pop + 
+                      #pop_density +
+                      #area_km2 +
+                      fs_type + 
+                      #s(longitude, latitude, bs = "sos", k = 30) +
+                      temperature_2m +
+                      s(precipitation, bs = 'ps', k = 20) +
+                      I(coastal*sea_surface_temp_centered), 
+                    data = cases_with_all,
+                    #method = 'discrete',
+                    #discrete = T,
+                    family = 'binomial' 
+)
+summary(events_model_lagged)
+
 
 
 #GAM with more smooths
