@@ -600,7 +600,7 @@ cases_filtered <- cases_with_all %>%
 #GAM for MFP events (i.e. 0 or 1) with all of our variables (finally)
 events_model <- gam(icam_event ~  
                       coastal +
-                      s(I(coastal*max_chla), bs = 'ps', k = 8) +
+                      s(I(coastal*max_chla), bs = 'ps', k = 20) +
                       #I(coastal*max_chla) +
                       month + #max_chla +
                       #reg_name + 
@@ -624,7 +624,7 @@ summary(events_model)
 
 
 # Plot the smooth effect of max_chla
-plot(events_model_lagged, select = 2, shade = TRUE, shade.col = "lightblue",
+plot(events_model, select = 1, shade = TRUE, shade.col = "lightblue",
      xlab = "Chlorophyll-a", ylab = "Smooth function",
      main = "Effect of Chlorophyll-a on MFP Events", xlim=c(0,30),ylim = c(-2.5,2.5))
 
@@ -646,6 +646,8 @@ rug(cases_with_all$max_chla)
 # Add a grey dashed line at y = 0
 abline(h = 0, lty = 2, col = "grey50")
 
+cases_with_all_coastal <- filter(cases_with_all, coastal == 1)
+summary(cases_with_all_coastal$max_chla)
 
 # Create the lagged chlorophyll variable
 cases_with_all <- cases_with_all %>%
