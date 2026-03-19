@@ -113,26 +113,31 @@ chla_sf <- st_transform(chla_sf, crs = 3857)
 # Summarize data by clinic_ID, summing up the icam_total across all years
 summary_by_clinic <- icam_cases %>%
   group_by(clinic_ID) %>%
-  summarise(icam_total_sum = sum(icam_total, na.rm = TRUE),
-            icam_event_sum = sum(icam_event, na.rm = TRUE),
-            icam_large_event_sum = sum(large_icam_event, na.rm = TRUE))
+  summarise(
+    icam_total_sum = sum(icam_total, na.rm = TRUE),
+    icam_event_sum = sum(icam_event, na.rm = TRUE),
+    icam_large_event_sum = sum(large_icam_event, na.rm = TRUE)
+  )
 
-combined_data_allyears <- summary_by_clinic %>%
-  st_join(healthsheds_2022, by = c("clinic_ID" = "fs_uid"))
+# Merge summary stats back to the healthshed file by clinic ID
+combined_data_allyears <- healthsheds_2022 %>%
+  rename(clinic_ID = fs_uid) %>%
+  inner_join(
+    summary_by_clinic %>%
+      st_drop_geometry(),
+    by = "clinic_ID"
+  )
 
-cat("\n--- JOIN CHECK ---\n")
-cat("Rows in summary_by_clinic:", nrow(summary_by_clinic), "\n")
-cat("Distinct clinic_ID in summary_by_clinic:", dplyr::n_distinct(summary_by_clinic$clinic_ID), "\n")
-
+cat("\n--- POST-FIX JOIN CHECK ---\n")
 cat("Rows in combined_data_allyears:", nrow(combined_data_allyears), "\n")
-cat("Distinct clinic_ID in combined_data_allyears:", dplyr::n_distinct(combined_data_allyears$clinic_ID), "\n")
+cat("Distinct clinic_ID:", dplyr::n_distinct(combined_data_allyears$clinic_ID), "\n")
 
 dup_check <- combined_data_allyears %>%
   st_drop_geometry() %>%
   count(clinic_ID) %>%
   filter(n > 1)
 
-cat("Number of clinic_IDs duplicated after join:", nrow(dup_check), "\n")
+cat("Number of duplicated clinic_ID after join:", nrow(dup_check), "\n")
 print(head(dup_check, 20))
 ###endcheck
 
@@ -169,15 +174,13 @@ madagascar_coastline_buffer_large <- st_buffer(coastline_combined, dist = 50000,
 
 
 # Filter chlorophyll points within the buffer
-chla_coastal <- chla_sf[st_intersects(chla_sf, madagascar_coastline_buffer, sparse = FALSE), ]
+chla_coastal <- chla_sf[lengths(st_intersects(chla_sf, madagascar_coastline_buffer)) > 0, ]
 # (just for plotting chla)
-chla_coastal_large <- chla_sf[st_intersects(chla_sf, madagascar_coastline_buffer_large, sparse = FALSE), ]
-
-
+chla_coastal_large <- chla_sf[lengths(st_intersects(chla_sf, madagascar_coastline_buffer_large)) > 0, ]
 
 # Filter healthsheds that intersect with the Madagascar coastline buffer
 icam_cases_coastal_only <- icam_cases %>%
-  filter(st_intersects(., madagascar_coastline_buffer, sparse = FALSE))
+  filter(lengths(st_intersects(., madagascar_coastline_buffer)) > 0)
 
 # Create a new variable "coastal" that checks for intersection with the coastline buffer
 # INSTEAD of filtering out non-coastal entries
@@ -581,122 +584,12 @@ cases_with_all$precipitation <- cases_with_all$precipitation*1000
 ###########CHECK START########
 
 
-cat("\n================ MISALIGNMENT CHECK ================\n")
 
-# 1) Identify the monthly chlorophyll columns as they currently exist
-month_cols_current <- grep("^\\d{2}-\\d{4}$", names(chla_coastal_df), value = TRUE)
-
-cat("Number of chlorophyll month columns found:", length(month_cols_current), "\n")
-cat("First 12 current names:\n")
-print(head(month_cols_current, 12))
-cat("Last 12 current names:\n")
-print(tail(month_cols_current, 12))
-
-# 2) Build the CORRECT chronological month order from those same labels
-month_cols_correct <- format(
-  sort(as.Date(paste0("01-", month_cols_current), format = "%d-%m-%Y")),
-  "%m-%Y"
-)
-
-cat("\nFirst 12 correct chronological names:\n")
-print(head(month_cols_correct, 12))
-cat("Last 12 correct chronological names:\n")
-print(tail(month_cols_correct, 12))
-
-cat("\nDo current names already equal correct chronological order? ",
-    identical(month_cols_current, month_cols_correct), "\n")
-
-# 3) Create two versions of the chlorophyll table:
-#    - current version = what your code actually used
-#    - corrected version = same columns, same order, but with corrected month labels
-chla_current <- chla_coastal_df
-chla_corrected <- chla_coastal_df
-
-names(chla_corrected)[match(month_cols_current, names(chla_corrected))] <- month_cols_correct
-
-# 4) Use the SAME nearby pixel indices and SAME clinic-month rows,
-#    and compare the extracted max/mean chlorophyll under current vs corrected naming
-comparison_stats <- purrr::map2_dfr(
-  .x = icam_cases_near_water$clinic_ID,
-  .y = icam_cases_near_water$month_year,
-  .f = function(current_clinic, current_month) {
-    
-    indices <- nearby_indices_list[[as.character(current_clinic)]]
-    
-    if (length(indices) == 0) {
-      return(tibble(
-        mean_current = NA_real_,
-        mean_corrected = NA_real_,
-        max_current = NA_real_,
-        max_corrected = NA_real_,
-        n_obs_current = 0L,
-        n_obs_corrected = 0L
-      ))
-    }
-    
-    vals_current <- chla_current[[current_month]][indices]
-    vals_corrected <- chla_corrected[[current_month]][indices]
-    
-    tibble(
-      mean_current = if (all(is.na(vals_current))) NA_real_ else mean(vals_current, na.rm = TRUE),
-      mean_corrected = if (all(is.na(vals_corrected))) NA_real_ else mean(vals_corrected, na.rm = TRUE),
-      max_current = if (all(is.na(vals_current))) NA_real_ else max(vals_current, na.rm = TRUE),
-      max_corrected = if (all(is.na(vals_corrected))) NA_real_ else max(vals_corrected, na.rm = TRUE),
-      n_obs_current = sum(!is.na(vals_current)),
-      n_obs_corrected = sum(!is.na(vals_corrected))
-    )
-  }
-)
-
-# 5) Summarize whether results change
-mean_changed <- with(
-  comparison_stats,
-  sum(
-    xor(is.na(mean_current), is.na(mean_corrected)) |
-      (!is.na(mean_current) & !is.na(mean_corrected) & abs(mean_current - mean_corrected) > 1e-12)
-  )
-)
-
-max_changed <- with(
-  comparison_stats,
-  sum(
-    xor(is.na(max_current), is.na(max_corrected)) |
-      (!is.na(max_current) & !is.na(max_corrected) & abs(max_current - max_corrected) > 1e-12)
-  )
-)
-
-n_rows_total <- nrow(comparison_stats)
-
-cat("\nRows compared:", n_rows_total, "\n")
-cat("Rows where MEAN chlorophyll changes:", mean_changed, "\n")
-cat("Rows where MAX chlorophyll changes:", max_changed, "\n")
-
-cat("\nFraction changed (mean):", mean_changed / n_rows_total, "\n")
-cat("Fraction changed (max):", max_changed / n_rows_total, "\n")
-
-# 6) Show a few concrete examples where the current code and corrected code disagree
-changed_examples <- comparison_stats %>%
-  mutate(row_id = row_number()) %>%
-  bind_cols(
-    icam_cases_near_water %>% st_drop_geometry() %>% dplyr::select(clinic_ID, month_year)
-  ) %>%
-  filter(
-    xor(is.na(mean_current), is.na(mean_corrected)) |
-      xor(is.na(max_current), is.na(max_corrected)) |
-      (!is.na(mean_current) & !is.na(mean_corrected) & abs(mean_current - mean_corrected) > 1e-12) |
-      (!is.na(max_current) & !is.na(max_corrected) & abs(max_current - max_corrected) > 1e-12)
-  ) %>%
-  dplyr::select(clinic_ID, month_year, mean_current, mean_corrected, max_current, max_corrected, n_obs_current, n_obs_corrected)
-
-cat("\nFirst 20 changed rows:\n")
-print(head(changed_examples, 20))
-
-cat("\n================ END MISALIGNMENT CHECK ================\n")
 
 #in case we want to include spatial effects by region/district/clinic
-cases_with_all$clinic_ID <- as.factor(icam_chla_summary_seasonal$clinic_ID)
-cases_with_all$reg_uid <- as.factor(icam_chla_summary_seasonal$reg_uid)
-cases_with_all$dist_uid <- as.factor(icam_chla_summary_seasonal$dist_uid)
+cases_with_all$clinic_ID <- as.factor(cases_with_all$clinic_ID)
+cases_with_all$reg_uid <- as.factor(cases_with_all$reg_uid)
+cases_with_all$dist_uid <- as.factor(cases_with_all$dist_uid)
 
 
 #let's load analysis ready wealth index values (pre-matched by dimeji)
@@ -747,19 +640,74 @@ cases_with_all <- cases_with_all %>%
 cases_with_all$coastal[cases_with_all$max_chla==0] <- 0
 
 # Filter the dataframe and save it to a new object
-cases_filtered <- cases_with_all %>%
-  filter(! (year %in% c(2023, 2024)))
+#cases_filtered <- cases_with_all %>%
+#  filter(! (year %in% c(2023, 2024)))
 
 cases_with_all$clinic_ID_factor = as.factor(cases_with_all$clinic_ID)
 
+#MAIN MODEL
 #GAM for MFP events (i.e. 0 or 1) with all of our variables (finally)
 events_model <- gam(icam_event ~  
                       coastal +
+                      I(coastal*max_chla) +
+                      #s(I(coastal*max_chla), bs = 'ps', k = 20) +
+                      #I(coastal*max_chla) +
+                      #month + 
+                      #max_chla +
+                      #reg_name + 
+                      #s(clinic_ID_factor, bs = "re") +
+                      s(time, bs = 'ps', k = 20) + 
+                      wealth_index +
+                      population + 
+                      pop_density +
+                      #area_km2 +
+                      fs_type + 
+                      #s(longitude, latitude, bs = "sos", k = 30) +
+                      temperature_2m +
+                      s(precipitation, bs = 'ps', k = 20) +
+                      I(coastal*sea_surface_temp_centered), 
+                    data = cases_with_all,
+                    #method = 'discrete',
+                    #discrete = T,
+                    family = 'binomial' 
+)
+summary(events_model)
+
+# Plot the smooth effect of precipitation
+plot(events_model, select = 2, shade = TRUE, shade.col = "lightblue",
+     xlab = "Precipitation", ylab = "Smooth function",
+     main = "Effect of Precipitation on MFP events", xlim=c(0,30),ylim = c(-1.5,1.5))
+
+# Add a rug plot to show the distribution of the data
+rug(cases_with_all$precipitation)
+
+# Add a grey dashed line at y = 0
+abline(h = 0, lty = 2, col = "grey50")
+
+
+
+# Plot the smooth effect of time
+plot(events_model, select = 1, shade = TRUE, shade.col = "lightblue",
+     xlab = "Month", ylab = "Smooth function",
+     main = "Smooth time trend of MFP events")
+
+
+# Add a grey dashed line at y = 0
+abline(h = 0, lty = 2, col = "grey50")
+
+
+#########SENSITIVITY ANALYSES#########
+
+#Alt-gam 1: with chlorophyll as smooth instead of linear
+events_model_2 <- gam(icam_event ~  
+                      coastal +
+                      #I(coastal*max_chla) +
                       s(I(coastal*max_chla), bs = 'ps', k = 20) +
                       #I(coastal*max_chla) +
-                      #month + #max_chla +
+                      #month + 
+                      #max_chla +
                       #reg_name + 
-                      s(dist_uid, bs = "re") +
+                      #s(clinic_ID_factor, bs = "re") +
                       s(time, bs = 'ps', k = 20) + 
                       wealth_index +
                       population + 
@@ -775,11 +723,11 @@ events_model <- gam(icam_event ~
                     #discrete = T,
                     family = 'binomial' 
                     )
-summary(events_model)
+summary(events_model_2)
 
 
 # Plot the smooth effect of max_chla
-plot(events_model, select = 1, shade = TRUE, shade.col = "lightblue",
+plot(events_model_2, select = 1, shade = TRUE, shade.col = "lightblue",
      xlab = "Chlorophyll-a", ylab = "Smooth function",
      main = "Effect of Chlorophyll-a on MFP Events", xlim=c(0,30),ylim = c(-2.5,2.5))
 
@@ -791,18 +739,116 @@ abline(h = 0, lty = 2, col = "grey50")
 
 
 # Plot the smooth effect of precipitation
-plot(events_model, select = 3, shade = TRUE, shade.col = "lightblue",
+plot(events_model_2, select = 3, shade = TRUE, shade.col = "lightblue",
      xlab = "Precipitation", ylab = "Smooth function",
      main = "Effect of Precipitation on MFP events", xlim=c(0,30),ylim = c(-1.5,1.5))
 
 # Add a rug plot to show the distribution of the data
-rug(cases_with_all$max_chla)
+rug(cases_with_all$precipitation)
+
+# Add a grey dashed line at y = 0
+abline(h = 0, lty = 2, col = "grey50")
+
+###windorizing sensitivity analysis
+
+coastal_chla <- cases_with_all$max_chla[cases_with_all$coastal == 1]
+
+cat(
+  "Coastal observations with max_chla > 25:", sum(coastal_chla > 25, na.rm = TRUE), "\n",
+  "Percentage of non-missing coastal observations above 25:", 
+  100 * sum(coastal_chla > 25, na.rm = TRUE) / sum(!is.na(coastal_chla)),
+  "\n"
+)
+
+
+cases_with_all$max_chla_w25 <- pmin(cases_with_all$max_chla, 25)
+
+#model with linear
+events_model_w25 <- gam(
+  icam_event ~  
+    coastal +
+    I(coastal * max_chla_w25) +
+    s(time, bs = "ps", k = 20) + 
+    wealth_index +
+    population + 
+    pop_density +
+    fs_type + 
+    temperature_2m +
+    s(precipitation, bs = "ps", k = 20) +
+    I(coastal * sea_surface_temp_centered), 
+  data = cases_with_all,
+  family = "binomial"
+)
+
+summary(events_model_w25)
+plot(events_model_w25)
+
+
+#Alt-gam 1: with chlorophyll as smooth instead of linear WINDORISEZ
+events_model_w25_2 <- gam(icam_event ~  
+                        coastal +
+                        #I(coastal*max_chla) +
+                        s(I(coastal*max_chla_w25), bs = 'ps', k = 20) +
+                        #I(coastal*max_chla) +
+                        #month + 
+                        #max_chla +
+                        #reg_name + 
+                        #s(clinic_ID_factor, bs = "re") +
+                        s(time, bs = 'ps', k = 20) + 
+                        wealth_index +
+                        population + 
+                        pop_density +
+                        #area_km2 +
+                        fs_type + 
+                        #s(longitude, latitude, bs = "sos", k = 30) +
+                        temperature_2m +
+                        s(precipitation, bs = 'ps', k = 20) +
+                        I(coastal*sea_surface_temp_centered), 
+                      data = cases_with_all,
+                      #method = 'discrete',
+                      #discrete = T,
+                      family = 'binomial' 
+)
+summary(events_model_w25_2)
+
+# Plot the smooth effect of max_chla
+plot(events_model_w25_2, select = 1, shade = TRUE, shade.col = "lightblue",
+     xlab = "Chlorophyll-a", ylab = "Smooth function",
+     main = "Effect of Chlorophyll-a on MFP Events", xlim=c(0,25),ylim = c(-2.5,2.5))
+
+# Add a rug plot to show the distribution of the data
+rug(cases_with_all$max_chla_w25)
 
 # Add a grey dashed line at y = 0
 abline(h = 0, lty = 2, col = "grey50")
 
 
-
+#alt-GAM 2: with clinic-specific random effects (to demonstrate poor fit)
+events_model_3 <- bam(icam_event ~  
+                      coastal +
+                      I(coastal*max_chla) +
+                      #s(I(coastal*max_chla), bs = 'ps', k = 20) +
+                      #I(coastal*max_chla) +
+                      #month + 
+                      #max_chla +
+                      #reg_name + 
+                      s(clinic_ID_factor, bs = "re") +
+                      s(time, bs = 'ps', k = 20) + 
+                      wealth_index +
+                      population + 
+                      pop_density +
+                      #area_km2 +
+                      fs_type + 
+                      #s(longitude, latitude, bs = "sos", k = 30) +
+                      temperature_2m +
+                      s(precipitation, bs = 'ps', k = 20) +
+                      I(coastal*sea_surface_temp_centered), 
+                    data = cases_with_all,
+                    #method = 'discrete',
+                    discrete = T,
+                    family = 'binomial' 
+)
+summary(events_model_3)
 
 ################################ END OF USED CODE #################
 
