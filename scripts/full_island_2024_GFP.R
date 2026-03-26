@@ -46,12 +46,12 @@ population_new <- population_new %>%
 healthsheds_2022 <- st_read("./data/healthsheds2022.shp")
 healthsheds_2022 <- st_transform(healthsheds_2022, crs = 3857)
 
-# load cases data (icam_cases)
+# load cases data (GFP_cases)
 
 #this is data saved with the function st_write(data_file,"filename.gpkg")
-icam_cases <- st_read("./data/icam_cases_shapefile.gpkg")
+GFP_cases <- st_read("./data/gfp_cases_shapefile_new.gpkg")
 #change coordinate system to 3857 like the other file
-icam_cases <- st_transform(icam_cases, crs = 3857)
+GFP_cases <- st_transform(GFP_cases, crs = 3857)
 
 # convert raster to dataframe format 
 chla_df <- as.data.frame(rasterToPoints(chla))
@@ -64,32 +64,32 @@ coords <- chla_df[, 1:2]
 chlorophyll_columns <- chla_df[ , 3:length(names(chla_df))]
 
 #create column with month-year combination
-icam_cases <- icam_cases %>%
+GFP_cases <- GFP_cases %>%
   mutate(month_year = paste(sprintf("%02d", cPeriode), cAnnee, sep = "-"))
 
 
-cat("\n--- CHECK 1: raw month_year labels from icam_cases ---\n")
-print(head(sort(unique(icam_cases$month_year)), 20))
+cat("\n--- CHECK 1: raw month_year labels from GFP_cases ---\n")
+print(head(sort(unique(GFP_cases$month_year)), 20))
 
 month_dates_check <- as.Date(
-  paste0("01-", unique(icam_cases$month_year)),
+  paste0("01-", unique(GFP_cases$month_year)),
   format = "%d-%m-%Y"
 )
 
 cat("\n--- CHECK 2: chronologically sorted month_year labels ---\n")
 print(head(format(sort(month_dates_check), "%m-%Y"), 20))
 
-# we now change the largest icam events to a given value x (30 seems reasonable
+# we now change the largest GFP events to a given value x (30 seems reasonable
 # to preserve the vast majority of the data while moderating the 8 remaining outliers,
 # only 4 of which on the coast)
 
-#create a single category for icam events > x to mitigate outliers
+#create a single category for GFP events > x to mitigate outliers
 x <- 30
-icam_cases$icam_total[icam_cases$icam_total>x] <- x
-table(icam_cases$icam_total)
+GFP_cases$GFP_total[GFP_cases$GFP_total>x] <- x
+table(GFP_cases$GFP_total)
 
 
-unique_months <- unique(icam_cases$month_year)
+unique_months <- unique(GFP_cases$month_year)
 
 sorted_months <- format(
   sort(as.Date(paste0("01-", unique_months), format = "%d-%m-%Y")),
@@ -108,15 +108,15 @@ chla_sf <- st_transform(chla_sf, crs = 3857)
 # save chla_sf as shapefile in documents
 #st_write(chla_sf, "./data/chla_sf_new.shp",append=FALSE)
 
-#plot of all of icam events on all healthsheds
+#plot of all of GFP events on all healthsheds
 
-# Summarize data by clinic_ID, summing up the icam_total across all years
-summary_by_clinic <- icam_cases %>%
+# Summarize data by clinic_ID, summing up the GFP_total across all years
+summary_by_clinic <- GFP_cases %>%
   group_by(clinic_ID) %>%
   summarise(
-    icam_total_sum = sum(icam_total, na.rm = TRUE),
-    icam_event_sum = sum(icam_event, na.rm = TRUE),
-    icam_large_event_sum = sum(large_icam_event, na.rm = TRUE)
+    GFP_total_sum = sum(GFP_total, na.rm = TRUE),
+    GFP_event_sum = sum(GFP_event, na.rm = TRUE),
+    GFP_large_event_sum = sum(large_GFP_event, na.rm = TRUE)
   )
 
 # Merge summary stats back to the healthshed file by clinic ID
@@ -179,22 +179,22 @@ chla_coastal <- chla_sf[lengths(st_intersects(chla_sf, madagascar_coastline_buff
 chla_coastal_large <- chla_sf[lengths(st_intersects(chla_sf, madagascar_coastline_buffer_large)) > 0, ]
 
 # Filter healthsheds that intersect with the Madagascar coastline buffer
-icam_cases_coastal_only <- icam_cases %>%
+GFP_cases_coastal_only <- GFP_cases %>%
   filter(lengths(st_intersects(., madagascar_coastline_buffer)) > 0)
 
 # Create a new variable "coastal" that checks for intersection with the coastline buffer
 # INSTEAD of filtering out non-coastal entries
-icam_cases_coastal <- icam_cases %>%
+GFP_cases_coastal <- GFP_cases %>%
   mutate(coastal = as.integer(lengths(st_intersects(., madagascar_coastline_buffer)) > 0))
 
 
 
 
 #we now successfully created (a) an sf object containing the counts of 
-#icam events for all coastal healthsheds, called, "icam_cases_coastal", 
+#GFP events for all coastal healthsheds, called, "GFP_cases_coastal", 
 #and (b) another sf object containing clorophyll levels for all water 
 #pixels near the coast, called  "chla_coastal". what i would now like 
-#is to match each healthshed in icam_cases_coastal with the water pixels
+#is to match each healthshed in GFP_cases_coastal with the water pixels
 #it's close to. specifically, we can do the matching for a radius of 10km. 
 #obviously, each healthshed will be matched with multiple water pixels, and 
 #therefore multiple cholorphyl measures. what i would like to obtain is to 
@@ -218,26 +218,26 @@ chla_coastal_long <- chla_coastal %>%
 
 
 # Only keep coastal healthsheds (coastal == 1) before running st_join()
-icam_cases_near_water <- icam_cases_coastal %>%
+GFP_cases_near_water <- GFP_cases_coastal %>%
   filter(coastal == 1)
 
-rm(icam_cases_coastal_only, icam_cases)
+rm(GFP_cases_coastal_only, GFP_cases)
 
-#saveRDS(icam_cases_near_water, "./data/icam_cases_near_water.rds")
+#saveRDS(GFP_cases_near_water, "./data/GFP_cases_near_water.rds")
 #saveRDS(chla_coastal, "./data/chla_coastal_with_coords.rds")  
 
-#icam_cases_near_water_simp <- st_simplify(icam_cases_near_water)
+#GFP_cases_near_water_simp <- st_simplify(GFP_cases_near_water)
 #chla_coastal_simp <- st_simplify(chla_coastal)
 
 #Now run st_join() only on this smaller subset - takes about 90 minutes with 50km radius
-# icam_chla_join <- st_join(icam_cases_near_water_simp, chla_coastal_simp,
+# GFP_chla_join <- st_join(GFP_cases_near_water_simp, chla_coastal_simp,
 #                           join = st_is_within_distance, dist = 50000)
 
 ###START OF OLD BLOCK#######
 # Perform a spatial join to find water pixels within 50 km of each healthshed
 # takes about XX minutes (used to be 30 with just coastal stuff)
-# icam_chla_join <- st_join(
-#   icam_cases_coastal, 
+# GFP_chla_join <- st_join(
+#   GFP_cases_coastal, 
 #   chla_coastal, 
 #   join = st_is_within_distance, 
 #   dist = 50000 # 50 km radius
@@ -246,15 +246,15 @@ rm(icam_cases_coastal_only, icam_cases)
 #####################
 
 # Identify date columns
-# date_columns <- grep("^\\d{2}-\\d{4}$", names(icam_chla_join), value = TRUE)
+# date_columns <- grep("^\\d{2}-\\d{4}$", names(GFP_chla_join), value = TRUE)
 # 
 # # Process the data
-# icam_chla_filtered <- icam_chla_join %>%
+# GFP_chla_filtered <- GFP_chla_join %>%
 #   mutate(
 #     row_id = row_number(),
 #     chla_value = map2_dbl(month_year, row_id, function(my, id) {
 #       if (my %in% date_columns) {
-#         value <- icam_chla_join[[my]][id]
+#         value <- GFP_chla_join[[my]][id]
 #         if(is.numeric(value)) value else as.numeric(NA)
 #       } else {
 #         as.numeric(NA)
@@ -264,15 +264,15 @@ rm(icam_cases_coastal_only, icam_cases)
 #   dplyr::select(-all_of(date_columns), -row_id)
 # 
 # #clear large (and now useless) object from memory 
-# rm(icam_chla_join)
+# rm(GFP_chla_join)
 # 
 # #now calculate mean average monthly chlorophyll (probably useless) and 
 # # max average monthly cholorophyll per healthshed (probably useful)
 # 
 # # Step 1: Extract non-spatial data and calculate max and mean
-# non_spatial_data <- st_drop_geometry(icam_chla_filtered)
+# non_spatial_data <- st_drop_geometry(GFP_chla_filtered)
 # 
-# icam_chla_summary <- non_spatial_data %>%
+# GFP_chla_summary <- non_spatial_data %>%
 #   group_by(clinic_ID, month_year) %>%
 #   summarise(
 #     max_chla = if(all(is.na(chla_value))) NA_real_ else max(chla_value, na.rm = TRUE),
@@ -284,13 +284,13 @@ rm(icam_cases_coastal_only, icam_cases)
 #   dplyr::select(-chla_value)  # Remove the original chla_value column if you don't need it
 # 
 # # Step 2: Join with spatial data
-# spatial_data <- icam_chla_filtered %>% 
+# spatial_data <- GFP_chla_filtered %>% 
 #   dplyr::select(clinic_ID, geom) %>% 
 #   group_by(clinic_ID) %>%
 #   slice(1) %>%  # Take the first geometry for each clinic_ID
 #   ungroup()
 # 
-# icam_chla_summary_sf <- icam_chla_summary %>%
+# GFP_chla_summary_sf <- GFP_chla_summary %>%
 #   left_join(spatial_data, by = "clinic_ID") %>%
 #   st_as_sf()
 # 
@@ -301,17 +301,17 @@ rm(icam_cases_coastal_only, icam_cases)
 # #now NEED to rejoin the non-coastal healthsheds in this, with
 # #chlorophyll value 0:
 # 
-# # Step 1: Remove geometry from `icam_chla_summary_sf` before joining
-# icam_chla_summary_df <- icam_chla_summary_sf %>%
+# # Step 1: Remove geometry from `GFP_chla_summary_sf` before joining
+# GFP_chla_summary_df <- GFP_chla_summary_sf %>%
 #   st_drop_geometry() %>%  # Convert to a regular dataframe
 #   select(clinic_ID, month_year, max_chla, mean_chla, n_chla_obs)
 # 
 # # Step 2: Perform a left join, keeping all healthsheds
-# icam_final_sf <- icam_cases_coastal %>%
-#   left_join(icam_chla_summary_df, by = c("clinic_ID", "month_year"))
+# GFP_final_sf <- GFP_cases_coastal %>%
+#   left_join(GFP_chla_summary_df, by = c("clinic_ID", "month_year"))
 # 
 # # Step 3: Replace NA values for non-coastal healthsheds
-# icam_final_sf <- icam_final_sf %>%
+# GFP_final_sf <- GFP_final_sf %>%
 #   mutate(
 #     max_chla = ifelse(is.na(max_chla), 0, max_chla),
 #     mean_chla = ifelse(is.na(mean_chla), 0, mean_chla),
@@ -328,15 +328,15 @@ search_radius <- 50000
 cat("Running the final, optimized method with a", search_radius, "m radius...\n")
 
 # Step 1: Get UNIQUE clinic IDs. This is fast and correct.
-unique_clinic_ids <- icam_cases_near_water %>%
+unique_clinic_ids <- GFP_cases_near_water %>%
   st_drop_geometry() %>%
   distinct(clinic_ID)
 
 # Step 2: (THE NEW, FASTER WAY) Create the unique healthsheds sf object.
 # This finds the row index of the first appearance of each unique clinic ID
 # and uses it to subset the sf object directly. This is much faster than filter() + distinct().
-first_occurrence_indices <- match(unique_clinic_ids$clinic_ID, icam_cases_near_water$clinic_ID)
-unique_healthsheds_sf <- icam_cases_near_water[first_occurrence_indices, ]
+first_occurrence_indices <- match(unique_clinic_ids$clinic_ID, GFP_cases_near_water$clinic_ID)
+unique_healthsheds_sf <- GFP_cases_near_water[first_occurrence_indices, ]
 
 # Step 3: Perform the efficient spatial search ONCE.
 nearby_indices_list <- st_is_within_distance(unique_healthsheds_sf, chla_coastal, dist = search_radius)
@@ -349,8 +349,8 @@ chla_coastal_df <- st_drop_geometry(chla_coastal)
 
 # Step 6: The main calculation. Iterate and perform direct, indexed lookups.
 stats <- purrr::map2(
-  .x = icam_cases_near_water$clinic_ID,
-  .y = icam_cases_near_water$month_year,
+  .x = GFP_cases_near_water$clinic_ID,
+  .y = GFP_cases_near_water$month_year,
   .f = function(current_clinic, current_month) {
     
     indices <- nearby_indices_list[[current_clinic]]
@@ -379,7 +379,7 @@ stats <- purrr::map2(
   bind_rows()
 
 # Step 7: Combine the calculated stats with the original data.
-icam_chla_summary_FAST <- icam_cases_near_water %>% 
+GFP_chla_summary_FAST <- GFP_cases_near_water %>% 
   st_drop_geometry() %>% 
   bind_cols(stats) %>%
   dplyr::select(
@@ -393,12 +393,12 @@ icam_chla_summary_FAST <- icam_cases_near_water %>%
     lat = lat_new
   )
 
-cat("Fast method finished. The new object is 'icam_chla_summary_FAST'.\n")
+cat("Fast method finished. The new object is 'GFP_chla_summary_FAST'.\n")
 
 # Clean up
 #rm(unique_clinic_ids, first_occurrence_indices, unique_healthsheds_sf, nearby_indices_list, chla_coastal_df, stats)
 
-icam_chla_summary <- icam_chla_summary_FAST
+GFP_chla_summary <- GFP_chla_summary_FAST
 
 # Step 2: Join with spatial data
 # We use the 'unique_healthsheds_sf' object that we already created efficiently in the block above.
@@ -407,7 +407,7 @@ spatial_data <- unique_healthsheds_sf %>%
   dplyr::select(clinic_ID, geom)
 
 # Now, join the geometry back to the summary data.
-icam_chla_summary_sf <- icam_chla_summary %>%
+GFP_chla_summary_sf <- GFP_chla_summary %>%
   left_join(spatial_data, by = "clinic_ID") %>%
   st_as_sf()
 
@@ -423,17 +423,17 @@ icam_chla_summary_sf <- icam_chla_summary %>%
 #now NEED to rejoin the non-coastal healthsheds in this, with
 #chlorophyll value 0:
 
-# Step 1: Remove geometry from `icam_chla_summary_sf` before joining
-icam_chla_summary_df <- icam_chla_summary_sf %>%
+# Step 1: Remove geometry from `GFP_chla_summary_sf` before joining
+GFP_chla_summary_df <- GFP_chla_summary_sf %>%
   st_drop_geometry() %>%  # Convert to a regular dataframe
   dplyr::select(clinic_ID, month_year, max_chla, mean_chla, n_chla_obs)
 
 # Step 2: Perform a left join, keeping all healthsheds
-icam_final_sf <- icam_cases_coastal %>%
-  left_join(icam_chla_summary_df, by = c("clinic_ID", "month_year"))
+GFP_final_sf <- GFP_cases_coastal %>%
+  left_join(GFP_chla_summary_df, by = c("clinic_ID", "month_year"))
 
 # Step 3: Replace NA values for non-coastal healthsheds
-icam_final_sf <- icam_final_sf %>%
+GFP_final_sf <- GFP_final_sf %>%
   mutate(
     max_chla = ifelse(is.na(max_chla), 0, max_chla),
     mean_chla = ifelse(is.na(mean_chla), 0, mean_chla),
@@ -441,24 +441,24 @@ icam_final_sf <- icam_final_sf %>%
   )
 
 #create month variable that is actually in date format
-icam_chla_summary_seasonal <- icam_final_sf %>%
+GFP_chla_summary_seasonal <- GFP_final_sf %>%
   mutate(
     month = factor(substr(month_year, 1, 2), levels = sprintf("%02d", 1:12)),
     year = as.numeric(substr(month_year, 4, 7))
   )
 
 # Now, let's join the population data
-icam_chla_summary_seasonal <- icam_chla_summary_seasonal %>%
+GFP_chla_summary_seasonal <- GFP_chla_summary_seasonal %>%
   left_join(population_new, by = c("clinic_ID" = "fs_uid", "year" = "year"))
 
 
 #Create month_num variable
-icam_chla_summary_seasonal <- icam_chla_summary_seasonal %>%
+GFP_chla_summary_seasonal <- GFP_chla_summary_seasonal %>%
   mutate(month_num = as.numeric(factor(month, levels = c("01", "02", "03", "04", "05", "06", 
                                                          "07", "08", "09", "10", "11", "12"))))
 
 #create continuous time variable (from 1 to 84, the total number of months)
-icam_chla_summary_seasonal <- icam_chla_summary_seasonal %>%
+GFP_chla_summary_seasonal <- GFP_chla_summary_seasonal %>%
   mutate(
     time = (cAnnee - min(cAnnee)) * 12 + month_num - min(month_num) + 1
   )
@@ -466,7 +466,7 @@ icam_chla_summary_seasonal <- icam_chla_summary_seasonal %>%
 
 #now let's add population density:
 # Calculate area in square kilometers
-cases_with_all <- icam_chla_summary_seasonal %>%
+cases_with_all <- GFP_chla_summary_seasonal %>%
   mutate(area_km2 = as.numeric(st_area(geom)) / 1e6)  # Convert m^2 to km^2
 
 # Calculate population density (people per km^2)
@@ -611,8 +611,8 @@ cases_with_all <- cases_with_all %>%
 #cases_with_all <- st_read("./data/cases_with_all_50km.gpkg")
 ##############################################################
 #create alternative version with capped chlorophyll
-#icam_chla_capped <- cases_with_all
-#icam_chla_capped$max_chla[icam_chla_capped$max_chla > 15] <- 15
+#GFP_chla_capped <- cases_with_all
+#GFP_chla_capped$max_chla[GFP_chla_capped$max_chla > 15] <- 15
 
 #transform sea surface temperature so that it is centered around zero
 #that is to ensure the coastal effect is meaningful to interpret as
@@ -666,7 +666,7 @@ print(names(analysis_bundle))
 
 #MAIN MODEL
 #GAM for MFP events (i.e. 0 or 1) with all of our variables (finally)
-events_model <- gam(icam_event ~  
+events_model <- gam(GFP_event ~  
                       coastal +
                       I(coastal*max_chla) +
                       #s(I(coastal*max_chla), bs = 'ps', k = 20) +
@@ -721,7 +721,7 @@ abline(h = 0, lty = 2, col = "grey50")
 #########SENSITIVITY ANALYSES#########
 
 #Alt-gam 1: with chlorophyll as smooth instead of linear
-events_model_2 <- gam(icam_event ~  
+events_model_2 <- gam(GFP_event ~  
                       coastal +
                       #I(coastal*max_chla) +
                       s(I(coastal*max_chla), bs = 'ps', k = 20) +
@@ -787,7 +787,7 @@ cases_with_all$max_chla_w25 <- pmin(cases_with_all$max_chla, 25)
 
 #model with linear
 events_model_w25 <- gam(
-  icam_event ~  
+  GFP_event ~  
     coastal +
     I(coastal * max_chla_w25) +
     s(time, bs = "ps", k = 20) + 
@@ -807,7 +807,7 @@ plot(events_model_w25)
 
 
 #Alt-gam 1: with chlorophyll as smooth instead of linear WINDORISEZ
-events_model_w25_2 <- gam(icam_event ~  
+events_model_w25_2 <- gam(GFP_event ~  
                         coastal +
                         #I(coastal*max_chla) +
                         s(I(coastal*max_chla_w25), bs = 'ps', k = 20) +
@@ -846,7 +846,7 @@ abline(h = 0, lty = 2, col = "grey50")
 
 
 #alt-GAM 2: with clinic-specific random effects (to demonstrate poor fit)
-events_model_3 <- bam(icam_event ~  
+events_model_3 <- bam(GFP_event ~  
                       coastal +
                       I(coastal*max_chla) +
                       #s(I(coastal*max_chla), bs = 'ps', k = 20) +
@@ -891,7 +891,7 @@ cases_with_all <- cases_with_all %>%
 
 
 #GAM for MFP events (i.e. 0 or 1) with all of our variables (finally)
-events_model_lagged <- gam(icam_event ~  
+events_model_lagged <- gam(GFP_event ~  
                       coastal +
                       s(I(coastal*max_chla), bs = 'ps', k = 8) +
                       s(I(coastal*max_chla_lag1), bs = 'ps', k = 8) +
@@ -919,7 +919,7 @@ summary(events_model_lagged)
 
 
 #GAM with more smooths
-events_model <- gam(icam_event ~  
+events_model <- gam(GFP_event ~  
                       coastal +
                       s(I(coastal*max_chla), bs = 'ps', k = 20) +
                       #I(coastal*max_chla) +
@@ -943,7 +943,7 @@ summary(events_model)
 
 
 #BAM variant for fitting random intercepts fast
-events_model <- bam(icam_event ~  
+events_model <- bam(GFP_event ~  
                       coastal +
                       s(I(coastal*max_chla), bs = 'ps', k = 20) +
                       #I(coastal*max_chla) +
@@ -967,7 +967,7 @@ plot(events_model)
 # Plot the smooth effect of max_chla
 plot(events_model, select = 1, shade = TRUE, shade.col = "lightblue",
      xlab = "Chlorophyll-a", ylab = "Smooth function",
-     main = "Effect of Chlorophyll-a on ICAM Events", xlim=c(0,22),ylim = c(-2,2))
+     main = "Effect of Chlorophyll-a on GFP Events", xlim=c(0,22),ylim = c(-2,2))
 
 # Add a rug plot to show the distribution of the data
 rug(cases_with_all$max_chla)
@@ -975,13 +975,13 @@ rug(cases_with_all$max_chla)
 # Add a grey dashed line at y = 0
 abline(h = 0, lty = 2, col = "grey50")
 
-#update column large_ICAM_event, equal to 1 if there was an ICAM event of size > x, 
-#and 0 otherwise, meaning if ICAM_total = 0 or otherwise
+#update column large_GFP_event, equal to 1 if there was an GFP event of size > x, 
+#and 0 otherwise, meaning if GFP_total = 0 or otherwise
 x = 4
-cases_with_all <- mutate(cases_with_all, large_icam_event = ifelse(icam_total > x, 1, 0))
+cases_with_all <- mutate(cases_with_all, large_GFP_event = ifelse(GFP_total > x, 1, 0))
 
 #GAM for events (i.e. 0 or 1) with all of our variables (finally)
-large_events_model <- gam(large_icam_event ~  
+large_events_model <- gam(large_GFP_event ~  
                       coastal +
                       s(I(coastal*max_chla), bs = 'ps', k = 20) +
                       #I(coastal*max_chla) +
@@ -1009,7 +1009,7 @@ summary(large_events_model)
 # Plot the smooth effect of max_chla
 plot(large_events_model, select = 1, shade = TRUE, shade.col = "lightblue",
      xlab = "Chlorophyll-a", ylab = "Smooth function",
-     main = "Effect of Chlorophyll-a on ICAM Events", xlim=c(0,22))
+     main = "Effect of Chlorophyll-a on GFP Events", xlim=c(0,22))
 
 # Add a rug plot to show the distribution of the data
 rug(cases_with_all$max_chla)
@@ -1019,7 +1019,7 @@ abline(h = 0, lty = 2, col = "grey50")
 
 #GAM for cases counts (with cases censored at 50) with all of our variables
 #does not converge with region
-cases_model <- bam(icam_total ~ s(max_chla, bs = 'ps', k = 20) + 
+cases_model <- bam(GFP_total ~ s(max_chla, bs = 'ps', k = 20) + 
                      month + #max_chla +
                      #reg_name + 
                      s(time, bs = 'ps', k = 20) + 
@@ -1034,7 +1034,7 @@ summary(cases_model)
 # Plot the smooth effect of max_chla
 plot(cases_model, select = 1, shade = TRUE, shade.col = "lightblue",
      xlab = "Chlorophyll-a", ylab = "Smooth function",
-     main = "Effect of Chlorophyll-a on ICAM Events", xlim=c(0,22))
+     main = "Effect of Chlorophyll-a on GFP Events", xlim=c(0,22))
 
 # Add a rug plot to show the distribution of the data
 rug(cases_with_all$max_chla)
@@ -1047,22 +1047,22 @@ abline(h = 0, lty = 2, col = "grey50")
 ######PLOTTING ONLY FROM NOW ON ##############
 
 
-# Summarize data by clinic_ID, summing up the icam_total across all years
-summary_by_clinic <- icam_cases_coastal %>%
+# Summarize data by clinic_ID, summing up the GFP_total across all years
+summary_by_clinic <- GFP_cases_coastal %>%
   group_by(clinic_ID) %>%
   summarise(
-    icam_total_sum = sum(icam_total, na.rm = TRUE),
-    icam_event_sum = sum(icam_event, na.rm = TRUE),
-    icam_large_event_sum = sum(large_icam_event, na.rm = TRUE),
+    GFP_total_sum = sum(GFP_total, na.rm = TRUE),
+    GFP_event_sum = sum(GFP_event, na.rm = TRUE),
+    GFP_large_event_sum = sum(large_GFP_event, na.rm = TRUE),
     geom = st_union(geom)  # Combine geometries for each clinic_ID
   )
 
 
 
 
-# Plot Total ICAM Cases
+# Plot Total GFP Cases
 ggplot(combined_data_allyears) +
-  geom_sf(aes(fill = ifelse(icam_total_sum == 0, NA, icam_total_sum)), 
+  geom_sf(aes(fill = ifelse(GFP_total_sum == 0, NA, GFP_total_sum)), 
           color = "grey95", size = 0.05) +  # Reduce border size
   scale_fill_viridis_c(option = "plasma", direction = -1, na.value = "white") +  # Adjust color scale
   theme_minimal() +
@@ -1074,9 +1074,9 @@ ggplot(combined_data_allyears) +
 
 
 
-# Plot Total ICAM Events
+# Plot Total GFP Events
 ggplot(combined_data_allyears) +
-  geom_sf(aes(fill = ifelse(icam_event_sum == 0, NA, icam_event_sum)), 
+  geom_sf(aes(fill = ifelse(GFP_event_sum == 0, NA, GFP_event_sum)), 
           color = "grey95", size = 0.05) +  # Reduce border size
   scale_fill_viridis_c(option = "plasma", direction = -1, na.value = "white") +  # Adjust color scale
   theme_minimal() +
