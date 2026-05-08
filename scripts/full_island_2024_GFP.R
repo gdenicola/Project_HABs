@@ -658,14 +658,14 @@ analysis_bundle <- list(
   search_radius = search_radius
 )
 
-saveRDS(analysis_bundle, "./data/analysis_bundle_50km.rds")
+saveRDS(analysis_bundle, "./data/GFP_analysis_bundle_50km.rds")
 
 cat("\nSaved analysis bundle to: ./data/analysis_bundle_50km.rds\n")
 print(names(analysis_bundle))
 
 
 #MAIN MODEL
-#GAM for MFP events (i.e. 0 or 1) with all of our variables (finally)
+#GAM for GFP events (i.e. 0 or 1) with all of our variables (finally)
 events_model <- gam(GFP_event ~  
                       coastal +
                       I(coastal*max_chla) +
@@ -692,13 +692,13 @@ events_model <- gam(GFP_event ~
 )
 summary(events_model)
 
-saveRDS(events_model, "./data/events_model_main_50km.rds")
+saveRDS(events_model, "./data/GFP_events_control_model_main_50km.rds")
 cat("\nSaved main event model to: ./data/events_model_main_50km.rds\n")
 
 # Plot the smooth effect of precipitation
 plot(events_model, select = 2, shade = TRUE, shade.col = "lightblue",
      xlab = "Precipitation", ylab = "Smooth function",
-     main = "Effect of Precipitation on MFP events", xlim=c(0,30),ylim = c(-1.5,1.5))
+     main = "Effect of Precipitation on GFP events", xlim=c(0,30),ylim = c(-1.5,1.5))
 
 # Add a rug plot to show the distribution of the data
 rug(cases_with_all$precipitation)
@@ -711,7 +711,7 @@ abline(h = 0, lty = 2, col = "grey50")
 # Plot the smooth effect of time
 plot(events_model, select = 1, shade = TRUE, shade.col = "lightblue",
      xlab = "Month", ylab = "Smooth function",
-     main = "Smooth time trend of MFP events")
+     main = "Smooth time trend of GFP events")
 
 
 # Add a grey dashed line at y = 0
@@ -751,7 +751,7 @@ summary(events_model_2)
 # Plot the smooth effect of max_chla
 plot(events_model_2, select = 1, shade = TRUE, shade.col = "lightblue",
      xlab = "Chlorophyll-a", ylab = "Smooth function",
-     main = "Effect of Chlorophyll-a on MFP Events", xlim=c(0,30),ylim = c(-2.5,2.5))
+     main = "Effect of Chlorophyll-a on GFP Events", xlim=c(0,30),ylim = c(-2.5,2.5))
 
 # Add a rug plot to show the distribution of the data
 rug(cases_with_all$max_chla)
@@ -763,7 +763,7 @@ abline(h = 0, lty = 2, col = "grey50")
 # Plot the smooth effect of precipitation
 plot(events_model_2, select = 3, shade = TRUE, shade.col = "lightblue",
      xlab = "Precipitation", ylab = "Smooth function",
-     main = "Effect of Precipitation on MFP events", xlim=c(0,30),ylim = c(-1.5,1.5))
+     main = "Effect of Precipitation on GFP events", xlim=c(0,30),ylim = c(-1.5,1.5))
 
 # Add a rug plot to show the distribution of the data
 rug(cases_with_all$precipitation)
@@ -836,7 +836,7 @@ summary(events_model_w25_2)
 # Plot the smooth effect of max_chla
 plot(events_model_w25_2, select = 1, shade = TRUE, shade.col = "lightblue",
      xlab = "Chlorophyll-a", ylab = "Smooth function",
-     main = "Effect of Chlorophyll-a on MFP Events", xlim=c(0,25),ylim = c(-2.5,2.5))
+     main = "Effect of Chlorophyll-a on GFP Events", xlim=c(0,25),ylim = c(-2.5,2.5))
 
 # Add a rug plot to show the distribution of the data
 rug(cases_with_all$max_chla_w25)
@@ -890,7 +890,7 @@ cases_with_all <- cases_with_all %>%
   ungroup()
 
 
-#GAM for MFP events (i.e. 0 or 1) with all of our variables (finally)
+#GAM for GFP events (i.e. 0 or 1) with all of our variables (finally)
 events_model_lagged <- gam(GFP_event ~  
                       coastal +
                       s(I(coastal*max_chla), bs = 'ps', k = 8) +
@@ -1066,9 +1066,9 @@ ggplot(combined_data_allyears) +
           color = "grey95", size = 0.05) +  # Reduce border size
   scale_fill_viridis_c(option = "plasma", direction = -1, na.value = "white") +  # Adjust color scale
   theme_minimal() +
-  labs(fill = "MFP Cases") +
+  labs(fill = "GFP Cases") +
   labs(
-    title = "Total MFP Cases by Clinic",
+    title = "Total GFP Cases by Clinic",
     subtitle = "2016-2024"
   )
 
@@ -1080,9 +1080,9 @@ ggplot(combined_data_allyears) +
           color = "grey95", size = 0.05) +  # Reduce border size
   scale_fill_viridis_c(option = "plasma", direction = -1, na.value = "white") +  # Adjust color scale
   theme_minimal() +
-  labs(fill = "MFP Events") +
+  labs(fill = "GFP Events") +
   labs(
-    title = "Total MFP Events by Clinic",
+    title = "Total GFP Events by Clinic",
     subtitle = "2016-2024"
   )
 
