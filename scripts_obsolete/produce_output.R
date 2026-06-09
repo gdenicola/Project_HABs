@@ -7,8 +7,8 @@ library(ggplot2)
 
 rm(list=ls())
 
-analysis_bundle <- readRDS("./data/analysis_bundle_50km.rds")
-events_model_main <- readRDS("./data/events_model_main_50km.rds")
+analysis_bundle <- readRDS("./data/analysis_bundle_50km_augmented.rds")
+events_model_main <- readRDS("./data/events_model_main_50km_augmented.rds")
 
 list2env(analysis_bundle, envir = .GlobalEnv)
 

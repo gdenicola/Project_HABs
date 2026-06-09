@@ -1,0 +1,2 @@
+clinic_month_observations,unique_clinics,first_year,last_year,distinct_months,total_mfp_cases_capped_for_model,total_mfp_events,total_large_mfp_events,share_clinic_months_with_event,coastal_clinic_months,inland_clinic_months,coastal_events,inland_events
+278336,2764,2016,2024,108,1915,640,96,0.002299379167624741,115296,163040,392,248
