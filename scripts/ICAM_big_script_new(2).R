@@ -431,6 +431,13 @@ cases_with_all <- icam_chla_summary_seasonal %>%
     pop_density = population / area_km2
   )
 
+cases_with_all <- cases_with_all %>%
+  mutate(
+    population_10k = population / 10000,
+    pop_density_1000 = pop_density / 1000,
+    max_chla_10 = max_chla / 10
+  )
+
 ################################################################################
 # 8. ADD CLIMATE EXPOSURE VARIABLES
 ################################################################################
@@ -609,11 +616,11 @@ print(names(analysis_bundle))
 events_model <- gam(
   icam_event ~
     coastal +
-    I(coastal * max_chla) +
+    I(coastal * max_chla_10) +
     s(time, bs = "ps", k = 20) +
     wealth_index +
-    population +
-    pop_density +
+    population_10k +
+    pop_density_1000 +
     fs_type +
     temperature_2m +
     s(precipitation, bs = "ps", k = 20) +

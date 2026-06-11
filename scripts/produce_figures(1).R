@@ -802,7 +802,7 @@ save_figure(
 
 # Important:
 # Do NOT use model.frame(events_model_main) here. Because the model formula uses
-# terms like I(coastal * max_chla), model.frame() may keep the evaluated
+# terms like I(coastal * max_chla_10), model.frame() may keep the evaluated
 # interaction but drop the original variable max_chla. We need the original
 # analysis data for prediction plots.
 
@@ -811,7 +811,7 @@ model_vars <- unique(all.vars(formula(events_model_main)))
 
 model_df <- cases_with_all %>%
   sf::st_drop_geometry() %>%
-  dplyr::select(dplyr::any_of(model_vars))
+  dplyr::select(dplyr::any_of(c(model_vars, "max_chla", "max_chla_10")))
 
 model_df <- model_df[stats::complete.cases(model_df), , drop = FALSE]
 
@@ -860,12 +860,12 @@ coef_table <- summary(events_model_main)$p.table %>%
     or_high = exp(estimate + 1.96 * se),
     label = case_when(
       term == "coastal" ~ "Coastal",
-      grepl("max_chla", term, fixed = TRUE) ~ "Coastal x chlorophyll-a",
+      grepl("max_chla_10", term, fixed = TRUE) ~ "Coastal x chlorophyll-a\n(per 10 mg/m3)",
       grepl("sea_surface_temp_centered", term, fixed = TRUE) ~ "Coastal x SST",
       term == "temperature_2m" ~ "2 m temperature",
       term == "wealth_index" ~ "Wealth index",
-      term == "population" ~ "Population",
-      term == "pop_density" ~ "Population density",
+      term == "population_10k" ~ "Population\n(per 10,000)",
+      term == "pop_density_1000" ~ "Population density\n(per 1,000/km2)",
       term == "fs_typeCSB2" ~ "CSB2 facility",
       TRUE ~ term
     )
@@ -873,13 +873,13 @@ coef_table <- summary(events_model_main)$p.table %>%
 
 coef_terms_to_plot <- c(
   "Coastal",
-  "Coastal x chlorophyll-a",
+  "Coastal x chlorophyll-a\n(per 10 mg/m3)",
   "Coastal x SST",
   "2 m temperature",
   "CSB2 facility",
   "Wealth index",
-  "Population",
-  "Population density"
+  "Population\n(per 10,000)",
+  "Population density\n(per 1,000/km2)"
 )
 
 coef_plot_df <- coef_table %>%
@@ -901,7 +901,7 @@ p_coef <- ggplot(coef_plot_df, aes(x = or, y = label)) +
   ) +
   labs(
     title = "Parametric model terms",
-    x = "Odds ratio (log scale)",
+    x = "Odds ratio (log scale; units shown)",
     y = NULL
   )
 
@@ -968,7 +968,19 @@ model_df <- model_df %>%
     )
   )
 
-coastal_chla <- model_df %>%
+# Use the full analysis data for the raw chlorophyll-a plotting scale.
+# model_df is built from the model formula and may not retain raw max_chla
+# once the fitted model uses max_chla_10.
+coastal_chla <- cases_with_all %>%
+  sf::st_drop_geometry() %>%
+  mutate(
+    coastal_num = case_when(
+      is.numeric(coastal) ~ as.numeric(coastal),
+      is.factor(coastal) ~ as.numeric(as.character(coastal)),
+      is.character(coastal) ~ as.numeric(coastal),
+      TRUE ~ NA_real_
+    )
+  ) %>%
   filter(coastal_num == 1, is.finite(max_chla)) %>%
   pull(max_chla)
 
@@ -1000,6 +1012,7 @@ if ("coastal" %in% names(pred_chla)) {
 }
 
 pred_chla$max_chla <- chla_seq
+pred_chla$max_chla_10 <- chla_seq / 10
 
 if ("sea_surface_temp_centered" %in% names(pred_chla)) {
   pred_chla$sea_surface_temp_centered <- 0
