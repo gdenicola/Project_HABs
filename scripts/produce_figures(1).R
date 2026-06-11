@@ -863,7 +863,7 @@ coef_table <- summary(events_model_main)$p.table %>%
       grepl("max_chla_10", term, fixed = TRUE) ~ "Coastal x chlorophyll-a\n(per 10 mg/m3)",
       grepl("sea_surface_temp_centered", term, fixed = TRUE) ~ "Coastal x SST",
       term == "temperature_2m" ~ "2 m temperature",
-      term == "wealth_index" ~ "Wealth index",
+      term == "wealth_index_5" ~ "Wealth index",
       term == "population_10k" ~ "Population\n(per 10,000)",
       term == "pop_density_1000" ~ "Population density\n(per 1,000/km2)",
       term == "fs_typeCSB2" ~ "CSB2 facility",

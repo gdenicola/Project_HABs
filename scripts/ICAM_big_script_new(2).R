@@ -577,6 +577,8 @@ cases_with_all <- cases_with_all %>%
     sea_surface_temp_centered = sea_surface_temp - mean_sst_C
   )
 
+cases_with_all$wealth_index_5 <- cases_with_all$wealth_index/5
+
 centroids <- st_centroid(st_geometry(cases_with_all))
 centroid_coords <- st_coordinates(centroids)
 
@@ -618,7 +620,7 @@ events_model <- gam(
     coastal +
     I(coastal * max_chla_10) +
     s(time, bs = "ps", k = 20) +
-    wealth_index +
+    wealth_index_5 +
     population_10k +
     pop_density_1000 +
     fs_type +
