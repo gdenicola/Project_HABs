@@ -17,8 +17,8 @@
 #
 # Main outputs:
 #   ./results/standalone/*.png and *.pdf
-#   ./results/figures/figure2_outcome_marine_exposures.png/pdf
-#   ./results/figures/figure3_contextual_covariates.png/pdf
+#   ./results/figures/figure2_national_mfp_surveillance_record.png/pdf
+#   ./results/figures/figure3_environmental_contextual_covariates.png/pdf
 #   ./results/figures/figure4_model_results.png/pdf
 ################################################################################
 
@@ -485,11 +485,102 @@ healthshed_avg_pop_plot <- healthshed_avg %>%
   append_holes_with_nearest_value(healthshed_holes_sf, "log_avg_pop_density_filled")
 
 ################################################################################
-# 4. FIGURE 2 STANDALONE MAPS
-#    A: total MFP events by healthshed
-#    B: coastal chlorophyll-a by healthshed
-#    C: coastal sea surface temperature by healthshed
+# 4. FIGURE 2 STANDALONE PANELS
+#    A: national monthly MFP event clinic-months, stacked by event size
+#    B: total MFP events by healthshed
 ################################################################################
+
+# This panel uses the augmented event variables explicitly. Event counts are
+# clinic-months with any recorded MFP diagnosis, not individual patients.
+# The stacked categories are mutually exclusive:
+#   - small event clinic-months: at least one MFP diagnosis but fewer than 5 cases
+#   - large event clinic-months: 5 or more cases
+mfp_timeseries_df <- cases_with_all %>%
+  sf::st_drop_geometry() %>%
+  mutate(
+    month_int = as.integer(as.character(month)),
+    year_int = as.integer(as.character(year)),
+    date = as.Date(sprintf("%04d-%02d-01", year_int, month_int))
+  ) %>%
+  group_by(date, year_int, month_int) %>%
+  summarise(
+    small_event_clinic_months = sum(
+      icam_event_augmented == 1 & large_icam_event_augmented == 0,
+      na.rm = TRUE
+    ),
+    large_event_clinic_months = sum(
+      large_icam_event_augmented == 1,
+      na.rm = TRUE
+    ),
+    mfp_event_clinic_months = sum(icam_event_augmented, na.rm = TRUE),
+    mfp_cases_augmented = sum(icam_total_augmented, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(date)
+
+# Long format for stacked bars.
+# Use explicit namespaces here because some spatial/statistical packages define
+# their own select() generics, which can mask dplyr::select().
+mfp_timeseries_long <- mfp_timeseries_df %>%
+  dplyr::select(
+    date,
+    small_event_clinic_months,
+    large_event_clinic_months
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(small_event_clinic_months, large_event_clinic_months),
+    names_to = "event_size",
+    values_to = "event_clinic_months"
+  ) %>%
+  dplyr::mutate(
+    event_size = dplyr::recode(
+      event_size,
+      small_event_clinic_months = "Small event (<5 cases)",
+      large_event_clinic_months = "Large event (≥5 cases)"
+    ),
+    event_size = factor(
+      event_size,
+      levels = c("Small event (<5 cases)", "Large event (≥5 cases)")
+    )
+  )
+
+p_mfp_timeseries <- ggplot(
+  mfp_timeseries_long,
+  aes(x = date, y = event_clinic_months, fill = event_size)
+) +
+  geom_col(width = 25) +
+  scale_fill_manual(
+    values = c(
+      "Small event (<5 cases)" = "#A6CEE3",
+      "Large event (≥5 cases)" = "#1F78B4"
+    ),
+    name = "Event size"
+  ) +
+  scale_x_date(
+    date_breaks = "1 year",
+    date_labels = "%Y",
+    expand = expansion(mult = c(0.005, 0.01))
+  ) +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.08))
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(size = 12, face = "bold"),
+    plot.subtitle = element_text(size = 10),
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",
+    legend.title = element_text(size = 9),
+    legend.text = element_text(size = 8)
+  ) +
+  labs(
+    title = "Monthly recorded MFP events",
+    subtitle = "National clinic surveillance, 2016-2024",
+    x = NULL,
+    y = "MFP event clinic-months"
+  )
 
 p_mfp_events <- ggplot() +
   geom_sf(
@@ -517,6 +608,28 @@ p_mfp_events <- ggplot() +
     subtitle = "2016-2024"
   )
 
+save_panel(
+  p_mfp_timeseries,
+  "fig2a_monthly_mfp_events_by_size",
+  width = 7.0,
+  height = 3.8
+)
+
+save_panel(
+  p_mfp_events,
+  "fig2b_mfp_events_by_healthshed"
+)
+
+################################################################################
+# 5. FIGURE 3 STANDALONE MAPS
+#    A: coastal chlorophyll-a
+#    B: precipitation
+#    C: population density
+#    D: coastal sea surface temperature
+#    E: 2 m air temperature
+#    F: wealth index
+################################################################################
+
 p_chla_hs <- ggplot() +
   geom_sf(
     data = healthshed_avg_chla_plot,
@@ -540,6 +653,46 @@ p_chla_hs <- ggplot() +
   labs(
     title = "Average chlorophyll-a by healthshed",
     subtitle = "Coastal-linked healthsheds only"
+  )
+
+p_precip <- ggplot() +
+  geom_sf(
+    data = healthshed_avg_precip_plot,
+    aes(fill = avg_precipitation_filled),
+    color = NA
+  ) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    direction = -1,
+    na.value = "white",
+    limits = c(0.78, 9.99),
+    oob = scales::squish,
+    name = "Avg precip.\n(mm/day)"
+  ) +
+  coord_mada +
+  map_theme +
+  labs(
+    title = "Average precipitation by healthshed",
+    subtitle = "2016-2024"
+  )
+
+p_pop_density <- ggplot() +
+  geom_sf(
+    data = healthshed_avg_pop_plot,
+    aes(fill = log_avg_pop_density_filled),
+    color = NA
+  ) +
+  scale_fill_viridis_c(
+    option = "viridis",
+    direction = -1,
+    na.value = "white",
+    name = "Log population\ndensity"
+  ) +
+  coord_mada +
+  map_theme +
+  labs(
+    title = "Population density by healthshed",
+    subtitle = "Log-scale"
   )
 
 p_sst_hs <- ggplot() +
@@ -567,18 +720,6 @@ p_sst_hs <- ggplot() +
     subtitle = "Coastal-linked healthsheds only"
   )
 
-save_panel(p_mfp_events, "fig2a_mfp_events_by_healthshed")
-save_panel(p_chla_hs, "fig2b_chlorophyll_by_healthshed")
-save_panel(p_sst_hs, "fig2c_sst_by_healthshed")
-
-################################################################################
-# 5. FIGURE 3 STANDALONE MAPS
-#    A: 2 m air temperature
-#    B: precipitation
-#    C: wealth index
-#    Additional: population density for artist panel / supplement
-################################################################################
-
 p_temp_2m <- ggplot() +
   geom_sf(
     data = healthshed_avg_temp_plot,
@@ -595,27 +736,6 @@ p_temp_2m <- ggplot() +
   map_theme +
   labs(
     title = "Average 2 m temperature by healthshed",
-    subtitle = "2016-2024"
-  )
-
-p_precip <- ggplot() +
-  geom_sf(
-    data = healthshed_avg_precip_plot,
-    aes(fill = avg_precipitation_filled),
-    color = NA
-  ) +
-  scale_fill_viridis_c(
-    option = "plasma",
-    direction = -1,
-    na.value = "white",
-    limits = c(0.78, 9.99),
-    oob = scales::squish,
-    name = "Avg precip.\n(mm/day)"
-  ) +
-  coord_mada +
-  map_theme +
-  labs(
-    title = "Average precipitation by healthshed",
     subtitle = "2016-2024"
   )
 
@@ -638,31 +758,14 @@ p_wealth <- ggplot() +
     subtitle = "Log-scale"
   )
 
-p_pop_density <- ggplot() +
-  geom_sf(
-    data = healthshed_avg_pop_plot,
-    aes(fill = log_avg_pop_density_filled),
-    color = NA
-  ) +
-  scale_fill_viridis_c(
-    option = "viridis",
-    direction = -1,
-    na.value = "white",
-    name = "Log population\ndensity"
-  ) +
-  coord_mada +
-  map_theme +
-  labs(
-    title = "Population density by healthshed",
-    subtitle = "Log-scale"
-  )
-
-save_panel(p_temp_2m, "fig3a_temperature_2m_by_healthshed")
+save_panel(p_chla_hs, "fig3a_chlorophyll_by_healthshed")
 save_panel(p_precip, "fig3b_precipitation_by_healthshed")
-save_panel(p_wealth, "fig3c_wealth_index_by_healthshed")
+save_panel(p_pop_density, "fig3c_population_density_by_healthshed")
+save_panel(p_sst_hs, "fig3d_sst_by_healthshed")
+save_panel(p_temp_2m, "fig3e_temperature_2m_by_healthshed")
+save_panel(p_wealth, "fig3f_wealth_index_by_healthshed")
 
-# Population-density map with the same label/legend style as the other maps.
-# This is not part of main Figure 3, but is useful for the artist and supplement.
+# Backward-compatible standalone filename used by the previous script.
 save_panel(p_pop_density, "supp_population_density_by_healthshed")
 
 # Artist-friendly transparent population-density map with no legend/title.
@@ -730,58 +833,79 @@ ggsave(
 # 6. COMPOSITE FIGURE 2
 ################################################################################
 
+p_mfp_timeseries_comp <- p_mfp_timeseries +
+  theme(
+    plot.title = element_text(size = 10, face = "bold"),
+    plot.subtitle = element_blank(),
+    axis.title.y = element_text(size = 8),
+    axis.text = element_text(size = 7),
+    legend.position = "bottom",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 7),
+    legend.key.height = unit(0.28, "cm"),
+    legend.key.width = unit(0.7, "cm"),
+    plot.margin = margin(4, 4, 4, 4)
+  ) +
+  labs(title = "Monthly recorded MFP events")
+
 p_mfp_events_comp <- p_mfp_events +
   composite_map_theme +
-  labs(title = "Recorded MFP events")
+  labs(title = "Recorded MFP events by healthshed")
+
+figure2 <- plot_grid(
+  p_mfp_timeseries_comp,
+  p_mfp_events_comp,
+  labels = c("A", "B"),
+  label_size = 12,
+  label_fontface = "bold",
+  ncol = 2,
+  rel_widths = c(1.1, 0.9),
+  align = "h",
+  axis = "tb"
+)
+
+save_figure(
+  figure2,
+  "figure2_national_mfp_surveillance_record",
+  width = 12,
+  height = 5.2
+)
+################################################################################
+# 7. COMPOSITE FIGURE 3
+################################################################################
 
 p_chla_hs_comp <- p_chla_hs +
   composite_map_theme +
   labs(title = "Coastal chlorophyll-a")
 
+p_precip_comp <- p_precip +
+  composite_map_theme +
+  labs(title = "Precipitation")
+
+p_pop_density_comp <- p_pop_density +
+  composite_map_theme +
+  labs(title = "Population density")
+
 p_sst_hs_comp <- p_sst_hs +
   composite_map_theme +
   labs(title = "Coastal sea surface temperature")
 
-figure2 <- plot_grid(
-  p_mfp_events_comp,
-  p_chla_hs_comp,
-  p_sst_hs_comp,
-  labels = c("A", "B", "C"),
-  label_size = 12,
-  label_fontface = "bold",
-  ncol = 3,
-  align = "hv",
-  axis = "tblr"
-)
-
-save_figure(
-  figure2,
-  "figure2_outcome_marine_exposures",
-  width = 12,
-  height = 5.2
-)
-
-################################################################################
-# 7. COMPOSITE FIGURE 3
-################################################################################
-
 p_temp_2m_comp <- p_temp_2m +
   composite_map_theme +
   labs(title = "2 m temperature")
-
-p_precip_comp <- p_precip +
-  composite_map_theme +
-  labs(title = "Precipitation")
 
 p_wealth_comp <- p_wealth +
   composite_map_theme +
   labs(title = "Wealth index")
 
 figure3 <- plot_grid(
-  p_temp_2m_comp,
+  p_chla_hs_comp,
   p_precip_comp,
+  p_pop_density_comp,
+  p_sst_hs_comp,
+  p_temp_2m_comp,
   p_wealth_comp,
-  labels = c("A", "B", "C"),
+  labels = c("A", "B", "C", "D", "E", "F"),
   label_size = 12,
   label_fontface = "bold",
   ncol = 3,
@@ -791,11 +915,10 @@ figure3 <- plot_grid(
 
 save_figure(
   figure3,
-  "figure3_contextual_covariates",
+  "figure3_environmental_contextual_covariates",
   width = 12,
-  height = 5.2
+  height = 8.6
 )
-
 ################################################################################
 # 8. FIGURE 4 MODEL RESULTS
 ################################################################################
@@ -1208,9 +1331,9 @@ save_figure(
 # 10. SELECTED SUPPLEMENTARY OUTPUTS
 ################################################################################
 
-# The lean standalone folder contains one PNG for each manuscript panel, one
-# labeled population-density map, one transparent population-density map for the
-# artist, and the supplementary news-reported event map below.
+# The lean standalone folder contains one PNG for each manuscript panel,
+# transparent socioeconomic maps for the artist, and the supplementary
+# news-reported event map below.
 
 # -------------------------------
 # 10.1 Supplementary all news-reported event map, if available
@@ -1411,6 +1534,7 @@ write_csv(coastal_summary, file.path(tables_dir, "coastal_summary.csv"))
 write_csv(top_regions, file.path(tables_dir, "top_regions.csv"))
 write_csv(coef_table, file.path(tables_dir, "main_model_parametric_terms.csv"))
 write_csv(smooth_table, file.path(tables_dir, "main_model_smooth_terms.csv"))
+write_csv(mfp_timeseries_df, file.path(tables_dir, "monthly_mfp_event_timeseries.csv"))
 
 cat("\n==============================\n")
 cat("CORE SAMPLE DESCRIPTION\n")
@@ -1426,6 +1550,11 @@ cat("\n==============================\n")
 cat("TOP REGIONS\n")
 cat("==============================\n")
 print(top_regions, n = 10, width = 1000)
+
+cat("\n==============================\n")
+cat("MONTHLY MFP EVENT TIME SERIES\n")
+cat("==============================\n")
+print(mfp_timeseries_df, n = 12, width = 1000)
 
 cat("\n==============================\n")
 cat("MAIN MODEL PARAMETRIC TERMS\n")
