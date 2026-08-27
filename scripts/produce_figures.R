@@ -52,11 +52,13 @@ out_dir <- "./results"
 standalone_dir <- file.path(out_dir, "standalone")
 figures_dir <- file.path(out_dir, "figures")
 tables_dir <- file.path(out_dir, "tables")
+supplementary_dir <- file.path(out_dir, "supplementary")
 
 invisible(dir.create(out_dir, showWarnings = FALSE, recursive = TRUE))
 invisible(dir.create(standalone_dir, showWarnings = FALSE, recursive = TRUE))
 invisible(dir.create(figures_dir, showWarnings = FALSE, recursive = TRUE))
 invisible(dir.create(tables_dir, showWarnings = FALSE, recursive = TRUE))
+invisible(dir.create(supplementary_dir, showWarnings = FALSE, recursive = TRUE))
 
 # Keep the standalone folder lean: remove old standalone PNG/PDF outputs from
 # previous runs before writing the current set. Composite figures are left alone
@@ -125,6 +127,34 @@ save_figure <- function(plot, filename, width = 10, height = 6.5,
                         dpi = 500, bg = "white") {
   png_path <- file.path(figures_dir, paste0(filename, ".png"))
   pdf_path <- file.path(figures_dir, paste0(filename, ".pdf"))
+  
+  ggsave(
+    filename = png_path,
+    plot = plot,
+    width = width,
+    height = height,
+    units = "in",
+    dpi = dpi,
+    bg = bg
+  )
+  
+  ggsave(
+    filename = pdf_path,
+    plot = plot,
+    width = width,
+    height = height,
+    units = "in",
+    device = "pdf",
+    bg = bg
+  )
+  
+  invisible(plot)
+}
+
+save_supplementary_figure <- function(plot, filename, width = 10, height = 5,
+                                      dpi = 500, bg = "white") {
+  png_path <- file.path(supplementary_dir, paste0(filename, ".png"))
+  pdf_path <- file.path(supplementary_dir, paste0(filename, ".pdf"))
   
   ggsave(
     filename = png_path,
@@ -923,11 +953,66 @@ save_figure(
 # 8. FIGURE 4 MODEL RESULTS
 ################################################################################
 
+# Figure 4 now has two panels:
+#   A: estimated odds ratios from the main model
+#   B: observed MFP event frequency across coastal chlorophyll-a and SST quintiles
+#
+# The previous predicted-probability chlorophyll panel and temporal/precipitation
+# smooths are no longer part of the main figure. The smooth terms are saved as a
+# two-panel supplementary figure in ./results/supplementary/.
+
 # Important:
 # Do NOT use model.frame(events_model_main) here. Because the model formula uses
 # terms like I(coastal * max_chla_10), model.frame() may keep the evaluated
-# interaction but drop the original variable max_chla. We need the original
-# analysis data for prediction plots.
+# interaction but drop the original variable max_chla. We use the original
+# analysis data where raw exposure values are needed.
+
+event_var <- if ("icam_event_augmented" %in% names(cases_with_all)) {
+  "icam_event_augmented"
+} else {
+  "icam_event"
+}
+
+if (!("max_chla_10" %in% names(cases_with_all))) {
+  cases_with_all <- cases_with_all %>%
+    dplyr::mutate(max_chla_10 = max_chla / 10)
+}
+
+if (!("sea_surface_temp" %in% names(cases_with_all))) {
+  stop("Expected sea_surface_temp in cases_with_all.")
+}
+
+if (!("sea_surface_temp_centered" %in% names(cases_with_all))) {
+  cases_with_all <- cases_with_all %>%
+    dplyr::mutate(
+      sea_surface_temp_centered =
+        sea_surface_temp - median(sea_surface_temp, na.rm = TRUE)
+    )
+}
+
+coastal_numeric <- function(x) {
+  dplyr::case_when(
+    is.numeric(x) ~ as.numeric(x),
+    is.factor(x) ~ as.numeric(as.character(x)),
+    is.character(x) ~ as.numeric(x),
+    TRUE ~ NA_real_
+  )
+}
+
+binom_ci <- function(events, n, conf.level = 0.95) {
+  if (is.na(events) || is.na(n) || n <= 0) {
+    return(c(NA_real_, NA_real_))
+  }
+  
+  ci <- stats::prop.test(
+    x = events,
+    n = n,
+    correct = FALSE,
+    conf.level = conf.level
+  )$conf.int
+  
+  as.numeric(ci)
+}
 
 model_terms <- terms(events_model_main)
 model_vars <- unique(all.vars(formula(events_model_main)))
@@ -947,46 +1032,31 @@ print(table(model_df$coastal, useNA = "ifany"))
 cat("max_chla summary:\n")
 print(summary(model_df$max_chla))
 
-mode_value_local <- function(x) {
-  x <- x[!is.na(x)]
-  if (length(x) == 0) return(NA)
-  ux <- unique(x)
-  ux[which.max(tabulate(match(x, ux)))]
-}
-
-set_coastal_one <- function(x) {
-  if (is.factor(x)) {
-    return(factor("1", levels = levels(x)))
-  }
-  if (is.character(x)) {
-    return("1")
-  }
-  return(1)
-}
-
 # -------------------------------
-# 8.1 Parametric coefficient plot
+# 8.1 Panel A: estimated model odds ratios
 # -------------------------------
 
 coef_table <- summary(events_model_main)$p.table %>%
   as.data.frame() %>%
   tibble::rownames_to_column("term") %>%
-  rename(
+  dplyr::rename(
     estimate = Estimate,
     se = `Std. Error`,
     z_value = `z value`,
     p_value = `Pr(>|z|)`
   ) %>%
-  mutate(
+  dplyr::mutate(
     or = exp(estimate),
     or_low = exp(estimate - 1.96 * se),
     or_high = exp(estimate + 1.96 * se),
-    label = case_when(
+    label = dplyr::case_when(
       term == "coastal" ~ "Coastal",
-      grepl("max_chla_10", term, fixed = TRUE) ~ "Coastal x chlorophyll-a\n(per 10 mg/m3)",
-      grepl("sea_surface_temp_centered", term, fixed = TRUE) ~ "Coastal x SST",
+      grepl("max_chla_10", term, fixed = TRUE) ~
+        "Coastal x chlorophyll-a\n(per 10 mg/m3)",
+      grepl("sea_surface_temp_centered", term, fixed = TRUE) ~
+        "Coastal x SST",
       term == "temperature_2m" ~ "2 m temperature",
-      term == "wealth_index_5" ~ "Wealth index",
+      term %in% c("wealth_index", "wealth_index_5") ~ "Wealth index",
       term == "population_10k" ~ "Population\n(per 10,000)",
       term == "pop_density_1000" ~ "Population density\n(per 1,000/km2)",
       term == "fs_typeCSB2" ~ "CSB2 facility",
@@ -1006,38 +1076,203 @@ coef_terms_to_plot <- c(
 )
 
 coef_plot_df <- coef_table %>%
-  filter(label %in% coef_terms_to_plot) %>%
-  mutate(
+  dplyr::filter(label %in% coef_terms_to_plot) %>%
+  dplyr::mutate(
     label = factor(label, levels = rev(coef_terms_to_plot))
   )
 
 p_coef <- ggplot(coef_plot_df, aes(x = or, y = label)) +
-  geom_vline(xintercept = 1, linetype = "dashed", color = "grey50") +
-  geom_errorbarh(aes(xmin = or_low, xmax = or_high), height = 0.18) +
+  geom_vline(
+    xintercept = 1,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  geom_errorbarh(
+    aes(xmin = or_low, xmax = or_high),
+    height = 0.18,
+    linewidth = 0.45
+  ) +
   geom_point(size = 2) +
-  scale_x_log10() +
+  scale_x_continuous(
+    breaks = scales::breaks_pretty(n = 5),
+    expand = expansion(mult = c(0.05, 0.08))
+  ) +
   theme_minimal(base_size = 10) +
   theme(
     panel.grid.minor = element_blank(),
     plot.title = element_text(size = 12, face = "bold"),
-    axis.title.y = element_blank()
+    axis.title.y = element_blank(),
+    axis.text.y = element_text(size = 8)
   ) +
   labs(
-    title = "Parametric model terms",
-    x = "Odds ratio (log scale; units shown)",
+    title = "Estimated associations with recorded MFP events",
+    x = "Odds ratio",
     y = NULL
   )
 
 save_panel(
   p_coef,
-  "fig4a_parametric_terms",
+  "fig4a_estimated_associations",
   width = 6.0,
   height = 4.5
 )
 
 # -------------------------------
-# 8.2 Prediction helper for Figure 4
+# 8.2 Panel B: observed coastal event frequency by exposure quintile
 # -------------------------------
+
+cases_model <- cases_with_all %>%
+  sf::st_drop_geometry() %>%
+  dplyr::mutate(
+    coastal_num = coastal_numeric(coastal),
+    event = as.numeric(.data[[event_var]])
+  )
+
+coastal_data <- cases_model %>%
+  dplyr::filter(
+    coastal_num == 1,
+    is.finite(max_chla),
+    is.finite(sea_surface_temp),
+    !is.na(event)
+  )
+
+if (nrow(coastal_data) < 10) {
+  stop("Too few finite coastal observations for Figure 4B.")
+}
+
+cat("\nCoastal clinic-months used for Figure 4B: ", nrow(coastal_data), "\n", sep = "")
+cat(
+  "Coastal MFP event clinic-months used for Figure 4B: ",
+  sum(coastal_data$event, na.rm = TRUE),
+  "\n",
+  sep = ""
+)
+
+make_quintile_rates <- function(data, exposure_var, exposure_label) {
+  data %>%
+    dplyr::filter(is.finite(.data[[exposure_var]])) %>%
+    dplyr::mutate(
+      exposure_quintile = dplyr::ntile(.data[[exposure_var]], 5)
+    ) %>%
+    dplyr::group_by(exposure_quintile) %>%
+    dplyr::summarise(
+      clinic_months = dplyr::n(),
+      events = sum(event == 1, na.rm = TRUE),
+      exposure_min = min(.data[[exposure_var]], na.rm = TRUE),
+      exposure_max = max(.data[[exposure_var]], na.rm = TRUE),
+      exposure_median = median(.data[[exposure_var]], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    dplyr::rowwise() %>%
+    dplyr::mutate(
+      ci = list(binom_ci(events, clinic_months)),
+      rate_per_1000 = 1000 * events / clinic_months,
+      lower_per_1000 = 1000 * ci[[1]],
+      upper_per_1000 = 1000 * ci[[2]],
+      exposure = exposure_label
+    ) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(-ci)
+}
+
+quintile_rates <- dplyr::bind_rows(
+  make_quintile_rates(coastal_data, "max_chla", "Chlorophyll-a"),
+  make_quintile_rates(coastal_data, "sea_surface_temp", "Sea surface temperature")
+) %>%
+  dplyr::mutate(
+    exposure_quintile = factor(
+      paste0("Q", exposure_quintile),
+      levels = paste0("Q", 1:5)
+    ),
+    exposure = factor(
+      exposure,
+      levels = c("Chlorophyll-a", "Sea surface temperature")
+    )
+  )
+
+readr::write_csv(
+  quintile_rates,
+  file.path(tables_dir, "figure4b_observed_rates_by_exposure_quintile.csv")
+)
+
+p_b_quintiles <- ggplot(
+  quintile_rates,
+  aes(x = exposure_quintile, y = rate_per_1000)
+) +
+  geom_errorbar(
+    aes(ymin = lower_per_1000, ymax = upper_per_1000),
+    width = 0.16,
+    linewidth = 0.45
+  ) +
+  geom_point(size = 2) +
+  facet_wrap(~ exposure, nrow = 1) +
+  theme_minimal(base_size = 10) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.spacing.x = unit(0.8, "cm"),
+    plot.title = element_text(size = 12, face = "bold"),
+    strip.text = element_text(size = 9, face = "bold"),
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(size = 8),
+    axis.title.y = element_text(size = 9),
+    axis.text.y = element_text(size = 8)
+  ) +
+  labs(
+    title = "Observed MFP frequency across coastal exposure quintiles",
+    x = NULL,
+    y = "MFP events per 1,000 coastal clinic-months"
+  )
+
+save_panel(
+  p_b_quintiles,
+  "fig4b_observed_rates_by_exposure_quintile",
+  width = 7.0,
+  height = 4.5
+)
+
+# -------------------------------
+# 8.3 Composite Figure 4
+# -------------------------------
+
+figure4 <- plot_grid(
+  p_coef,
+  p_b_quintiles,
+  labels = c("A", "B"),
+  label_size = 12,
+  label_fontface = "bold",
+  ncol = 2,
+  rel_widths = c(1.10, 0.90),
+  align = "h",
+  axis = "tb"
+)
+
+save_figure(
+  figure4,
+  "figure4_model_results",
+  width = 12.5,
+  height = 5.2
+)
+
+################################################################################
+# 9. SUPPLEMENTARY SMOOTH TERMS
+################################################################################
+
+mode_value_local <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x) == 0) return(NA)
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+set_coastal_one <- function(x) {
+  if (is.factor(x)) {
+    return(factor("1", levels = levels(x)))
+  }
+  if (is.character(x)) {
+    return("1")
+  }
+  return(1)
+}
 
 make_reference_row <- function(data) {
   if (nrow(data) == 0) {
@@ -1068,7 +1303,6 @@ make_reference_row <- function(data) {
 
 newdata_base <- make_reference_row(model_df)
 
-# Set meaningful reference values for marine-exposure prediction.
 if ("coastal" %in% names(newdata_base)) {
   newdata_base$coastal <- set_coastal_one(newdata_base$coastal)
 }
@@ -1077,112 +1311,10 @@ if ("sea_surface_temp_centered" %in% names(newdata_base)) {
   newdata_base$sea_surface_temp_centered <- 0
 }
 
-# -------------------------------
-# 8.3 Predicted probability over coastal chlorophyll-a
-# -------------------------------
-
-model_df <- model_df %>%
-  mutate(
-    coastal_num = case_when(
-      is.numeric(coastal) ~ as.numeric(coastal),
-      is.factor(coastal) ~ as.numeric(as.character(coastal)),
-      is.character(coastal) ~ as.numeric(coastal),
-      TRUE ~ NA_real_
-    )
-  )
-
-# Use the full analysis data for the raw chlorophyll-a plotting scale.
-# model_df is built from the model formula and may not retain raw max_chla
-# once the fitted model uses max_chla_10.
-coastal_chla <- cases_with_all %>%
-  sf::st_drop_geometry() %>%
-  mutate(
-    coastal_num = case_when(
-      is.numeric(coastal) ~ as.numeric(coastal),
-      is.factor(coastal) ~ as.numeric(as.character(coastal)),
-      is.character(coastal) ~ as.numeric(coastal),
-      TRUE ~ NA_real_
-    )
-  ) %>%
-  filter(coastal_num == 1, is.finite(max_chla)) %>%
-  pull(max_chla)
-
-cat("\n--- Chlorophyll prediction check ---\n")
-cat("Finite coastal chlorophyll observations:", length(coastal_chla), "\n")
-print(summary(coastal_chla))
-
-if (length(coastal_chla) < 10) {
-  stop(
-    "Too few finite coastal chlorophyll observations to plot predicted probabilities. ",
-    "Check cases_with_all$coastal and cases_with_all$max_chla."
-  )
-}
-
-chla_from <- as.numeric(quantile(coastal_chla, 0.01, na.rm = TRUE))
-chla_to <- as.numeric(quantile(coastal_chla, 0.99, na.rm = TRUE))
-
-if (!is.finite(chla_from) || !is.finite(chla_to) || chla_from >= chla_to) {
-  chla_from <- min(coastal_chla, na.rm = TRUE)
-  chla_to <- max(coastal_chla, na.rm = TRUE)
-}
-
-chla_seq <- seq(chla_from, chla_to, length.out = 200)
-
-pred_chla <- newdata_base[rep(1, length(chla_seq)), , drop = FALSE]
-
-if ("coastal" %in% names(pred_chla)) {
-  pred_chla$coastal <- set_coastal_one(pred_chla$coastal)
-}
-
-pred_chla$max_chla <- chla_seq
-pred_chla$max_chla_10 <- chla_seq / 10
-
-if ("sea_surface_temp_centered" %in% names(pred_chla)) {
-  pred_chla$sea_surface_temp_centered <- 0
-}
-
-pred_chla_fit <- predict(
-  events_model_main,
-  newdata = pred_chla,
-  type = "link",
-  se.fit = TRUE
-)
-
-pred_chla_df <- tibble(
-  max_chla = chla_seq,
-  fit = plogis(pred_chla_fit$fit),
-  lower = plogis(pred_chla_fit$fit - 1.96 * pred_chla_fit$se.fit),
-  upper = plogis(pred_chla_fit$fit + 1.96 * pred_chla_fit$se.fit)
-)
-
-p_chla_pred <- ggplot(pred_chla_df, aes(x = max_chla, y = fit)) +
-  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
-  geom_line(linewidth = 0.9) +
-  theme_minimal(base_size = 10) +
-  theme(
-    panel.grid.minor = element_blank(),
-    plot.title = element_text(size = 12, face = "bold")
-  ) +
-  labs(
-    title = "Predicted MFP risk by coastal chlorophyll-a",
-    x = "Maximum chlorophyll-a (mg m-3)",
-    y = "Predicted probability of MFP event"
-  )
-
-save_panel(
-  p_chla_pred,
-  "fig4b_predicted_probability_chlorophyll",
-  width = 5.5,
-  height = 4.5
-)
-
-# -------------------------------
-# 8.4 Smooth-effect helper
-# -------------------------------
-
 make_smooth_plot <- function(model, base_row, data_for_limits, var_name, term_name,
                              x_label, title, x_limits = NULL,
-                             y_limits = NULL, rug_values = NULL) {
+                             y_limits = NULL,
+                             rug_values = NULL) {
   
   if (!(var_name %in% names(data_for_limits))) {
     stop("Variable ", var_name, " not found in data_for_limits.")
@@ -1220,12 +1352,12 @@ make_smooth_plot <- function(model, base_row, data_for_limits, var_name, term_na
   
   matched_term <- matched_term[1]
   
-  df <- tibble(
+  df <- tibble::tibble(
     x = x_seq,
     fit = as.numeric(terms_pred$fit[, matched_term]),
     se = as.numeric(terms_pred$se.fit[, matched_term])
   ) %>%
-    mutate(
+    dplyr::mutate(
       lower = fit - 1.96 * se,
       upper = fit + 1.96 * se
     )
@@ -1250,7 +1382,7 @@ make_smooth_plot <- function(model, base_row, data_for_limits, var_name, term_na
     
     p <- p +
       geom_rug(
-        data = tibble(x = rug_values),
+        data = tibble::tibble(x = rug_values),
         aes(x = x),
         inherit.aes = FALSE,
         sides = "b",
@@ -1289,42 +1421,22 @@ p_precip_smooth <- make_smooth_plot(
   rug_values = model_df$precipitation
 )
 
-save_panel(
-  p_time_smooth,
-  "fig4c_smooth_time",
-  width = 5.5,
-  height = 4.5
-)
-
-save_panel(
-  p_precip_smooth,
-  "fig4d_smooth_precipitation",
-  width = 5.5,
-  height = 4.5
-)
-
-################################################################################
-# 9. COMPOSITE FIGURE 4
-################################################################################
-
-figure4 <- plot_grid(
-  p_coef,
-  p_chla_pred,
+supp_smooth_terms <- plot_grid(
   p_time_smooth,
   p_precip_smooth,
-  labels = c("A", "B", "C", "D"),
+  labels = c("A", "B"),
   label_size = 12,
   label_fontface = "bold",
   ncol = 2,
-  align = "hv",
-  axis = "tblr"
+  align = "h",
+  axis = "tb"
 )
 
-save_figure(
-  figure4,
-  "figure4_model_results",
+save_supplementary_figure(
+  supp_smooth_terms,
+  "supplementary_smooth_time_precipitation",
   width = 10.5,
-  height = 8.5
+  height = 4.6
 )
 
 ################################################################################
